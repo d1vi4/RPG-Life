@@ -52,12 +52,6 @@ export const Header: React.FC<HeaderProps> = ({
     globalState.globalLevels || []
   );
 
-  const totalCategoriesXP = categories.reduce((sum, c) => sum + (c.categoryXP || 0), 0);
-  const totalHighestXP = categories.reduce(
-    (sum, c) => sum + (c.highestCategoryXP || c.categoryXP || 0),
-    0
-  );
-
   const navItems = [
     { id: 'categories', label: 'Категории & Задачи', icon: Layers, shortLabel: 'Задачи' },
     { id: 'globalShop', label: 'Общий UXP Магазин', icon: ShoppingBag, shortLabel: 'Магазин' },
@@ -160,27 +154,8 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Currency HUD Badges: Clear distinction between Spendable Balance & Title Record */}
+          {/* Currency HUD Badges: Global UXP Spendable Balance & Title Record UXP */}
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
-              <span className="text-[9px] font-gamer text-slate-400 uppercase">Баланс XP</span>
-              <div className="flex items-center gap-1 mt-0.5 text-xs font-mono-code font-bold text-emerald-400">
-                <Coins className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{totalCategoriesXP.toLocaleString()} XP</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/90 border border-indigo-950/40 rounded-xl p-2.5 flex flex-col justify-between border border-indigo-500/20">
-              <span className="text-[9px] font-gamer text-indigo-300 uppercase flex items-center gap-1">
-                <Crown className="w-3 h-3 text-indigo-400" />
-                <span>Титул XP</span>
-              </span>
-              <div className="flex items-center gap-1 mt-0.5 text-xs font-mono-code font-bold text-indigo-300">
-                <Award className="w-3.5 h-3.5 shrink-0 text-indigo-400" />
-                <span className="truncate">{totalHighestXP.toLocaleString()} XP</span>
-              </div>
-            </div>
-
             <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
               <span className="text-[9px] font-gamer text-slate-400 uppercase">Баланс UXP</span>
               <div className="flex items-center gap-1 mt-0.5 text-xs font-mono-code font-bold text-sky-400">
@@ -312,12 +287,12 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                  <span className="text-[10px] text-slate-400 block font-gamer uppercase">Баланс XP:</span>
-                  <span className="font-mono-code font-bold text-emerald-400">{totalCategoriesXP.toLocaleString()} XP</span>
+                  <span className="text-[10px] text-slate-400 block font-gamer uppercase">Баланс UXP:</span>
+                  <span className="font-mono-code font-bold text-sky-400">{globalState.globalUXP.toLocaleString()} UXP</span>
                 </div>
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-indigo-950 border-indigo-500/30">
-                  <span className="text-[10px] text-indigo-300 block font-gamer uppercase">Титул XP (Рекорд):</span>
-                  <span className="font-mono-code font-bold text-indigo-300">{totalHighestXP.toLocaleString()} XP</span>
+                <div className="p-2.5 rounded-xl bg-slate-900 border border-purple-950 border-purple-500/30">
+                  <span className="text-[10px] text-purple-300 block font-gamer uppercase">Титул UXP (Рекорд):</span>
+                  <span className="font-mono-code font-bold text-purple-300">{(globalState.highestGlobalUXP || globalState.globalUXP).toLocaleString()} UXP</span>
                 </div>
               </div>
             </motion.div>

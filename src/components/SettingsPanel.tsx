@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Layers,
   ShieldAlert,
@@ -10,6 +11,9 @@ import {
   Download,
   Upload,
   Smartphone,
+  AlertTriangle,
+  ArrowRight,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Category,
@@ -91,6 +95,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [penaltyXP, setPenaltyXP] = useState<number>(200);
   const [penaltyDesc, setPenaltyDesc] = useState('');
   const [editingPenaltyId, setEditingPenaltyId] = useState<string | null>(null);
+
+  // 6. Full Reset 2-Step Confirmation Modal State with 'uveren' keyword check
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetConfirmStep, setResetConfirmStep] = useState<1 | 2>(1);
+  const [resetInputKeyword, setResetInputKeyword] = useState('');
 
   // --- Handlers: Category Level Save ---
   const handleSaveCategoryLevel = (e: React.FormEvent) => {
@@ -1180,9 +1189,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
               <button
                 onClick={() => {
-                  if (confirm('Вы уверены? Все задачи, категории, записи календаря и опыт будут удалены в ноль!')) {
-                    onResetAllData();
-                  }
+                  setIsResetModalOpen(true);
+                  setResetConfirmStep(1);
+                  setResetInputKeyword('');
                 }}
                 className="px-4 py-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 text-xs font-gamer font-bold cursor-pointer transition-colors shrink-0"
               >
@@ -1192,6 +1201,125 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* 2-STEP CONFIRMATION MODAL FOR FULL ZERO STATE RESET */}
+      <AnimatePresence>
+        {isResetModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-[#0F172A] border border-red-500/50 rounded-2xl p-6 shadow-[0_0_40px_rgba(239,68,68,0.3)] text-slate-100 relative"
+            >
+              {resetConfirmStep === 1 ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-gamer font-bold text-base text-white">ШАГ 1 ИЗ 2: ПОЛНЫЙ СБРОС СИСТЕМЫ</h3>
+                      <p className="text-xs text-slate-400">Предупреждение о потере данных</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0B0F19] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                    <p className="text-xs text-slate-200 leading-relaxed">
+                      Вы собираетесь сбросить <span className="font-bold text-red-400">ВСЁ приложение в ноль</span>.
+                    </p>
+                    <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
+                      <li>Будут удалены все категории и все созданные задачи</li>
+                      <li>Обнулится весь опыт (XP, UXP) и титульные рекорды</li>
+                      <li>Очистится вся история календаря и журнал активности</li>
+                      <li>Удалятся все товары магазинов и уровни</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsResetModalOpen(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 font-gamer text-xs cursor-pointer hover:bg-slate-800"
+                    >
+                      ОТМЕНА
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetConfirmStep(2);
+                        setResetInputKeyword('');
+                      }}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-gamer font-bold text-xs shadow-md cursor-pointer transition-colors flex items-center gap-1.5"
+                    >
+                      <span>ПРОДОЛЖИТЬ</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 pb-3 border-b border-red-500/20">
+                    <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400 shrink-0">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-gamer font-bold text-base text-red-400">ШАГ 2 ИЗ 2: ПОДТВЕРЖДЕНИЕ СЛОВОМ</h3>
+                      <p className="text-xs text-slate-400">Защита от случайного нажатия</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-red-500/10 p-3.5 rounded-xl border border-red-500/30 text-xs text-red-200 leading-relaxed space-y-2">
+                    <p>
+                      Для окончательного сброса введите проверочное слово:{' '}
+                      <span className="font-mono-code font-bold text-white bg-red-950/80 px-2 py-0.5 rounded border border-red-500/40">
+                        uveren
+                      </span>
+                    </p>
+
+                    <input
+                      type="text"
+                      autoFocus
+                      value={resetInputKeyword}
+                      onChange={(e) => setResetInputKeyword(e.target.value)}
+                      placeholder="Напишите uveren"
+                      className="w-full rounded-xl border border-red-500/50 bg-[#0B0F19] px-3.5 py-2.5 text-sm font-mono-code text-white focus:border-red-400 focus:outline-none placeholder:text-slate-600"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetModalOpen(false);
+                        setResetConfirmStep(1);
+                        setResetInputKeyword('');
+                      }}
+                      className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 font-gamer text-xs cursor-pointer hover:bg-slate-800"
+                    >
+                      ОТМЕНА
+                    </button>
+                    <button
+                      type="button"
+                      disabled={resetInputKeyword.trim().toLowerCase() !== 'uveren'}
+                      onClick={() => {
+                        setIsResetModalOpen(false);
+                        setResetConfirmStep(1);
+                        setResetInputKeyword('');
+                        onResetAllData();
+                      }}
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-gamer font-bold text-xs shadow-[0_0_20px_rgba(239,68,68,0.4)] cursor-pointer transition-all flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>СБРОСИТЬ ВСЁ В НОЛЬ</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

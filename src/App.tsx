@@ -126,6 +126,8 @@ export const App: React.FC = () => {
       type,
       title,
       message,
+      duration: 5000,
+      createdAt: Date.now(),
     };
     setToasts((prev) => [...prev, newToast]);
   };
@@ -287,8 +289,13 @@ export const App: React.FC = () => {
       prevCategories.map((c) => {
         if (c.id !== targetCategory.id) return c;
 
-        const newCategoryXP = Math.max(0, (c.categoryXP || 0) + xpDelta);
-        const newHighestXP = Math.max(c.highestCategoryXP || 0, newCategoryXP);
+        const newCategoryXP = willBeCompleted
+          ? (c.categoryXP || 0) + task.xpReward
+          : Math.max(0, (c.categoryXP || 0) - task.xpReward);
+
+        const newHighestXP = willBeCompleted
+          ? Math.max(c.highestCategoryXP || 0, newCategoryXP)
+          : Math.max(0, (c.highestCategoryXP || 0) - task.xpReward);
 
         const prevProg = calculateCategoryProgression(c.categoryXP || 0, c.highestCategoryXP || 0, c.levels || []);
         const nextProg = calculateCategoryProgression(newCategoryXP, newHighestXP, c.levels || []);
@@ -327,8 +334,13 @@ export const App: React.FC = () => {
 
     // 5. Update Global UXP state and check Global Level Up
     setGlobalState((prev) => {
-      const newUXP = Math.max(0, (prev.globalUXP || 0) + uxpDelta);
-      const newHighestUXP = Math.max(prev.highestGlobalUXP || 0, newUXP);
+      const newUXP = willBeCompleted
+        ? (prev.globalUXP || 0) + task.uxpReward
+        : Math.max(0, (prev.globalUXP || 0) - task.uxpReward);
+
+      const newHighestUXP = willBeCompleted
+        ? Math.max(prev.highestGlobalUXP || 0, newUXP)
+        : Math.max(0, (prev.highestGlobalUXP || 0) - task.uxpReward);
 
       const prevProg = calculateGlobalProgression(prev.globalUXP || 0, prev.highestGlobalUXP || 0, prev.globalLevels || []);
       const nextProg = calculateGlobalProgression(newUXP, newHighestUXP, prev.globalLevels || []);
@@ -380,6 +392,22 @@ export const App: React.FC = () => {
 
     setCategories((prev) => [...prev, newCategory]);
     addToast('success', 'Категория создана', `Направление «${newCategory.name}» успешно добавлено.`);
+  };
+
+  const handleDeleteCategory = (categoryId: string) => {
+    const targetCat = categories.find((c) => c.id === categoryId);
+    setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    setTasks((prev) => prev.filter((t) => t.categoryId !== categoryId));
+
+    if (selectedCategoryId === categoryId) {
+      setSelectedCategoryId(null);
+    }
+
+    addToast(
+      'info',
+      'Категория удалена',
+      `Категория «${targetCat?.name || ''}» и все её задачи безвозвратно удалены.`
+    );
   };
 
   // --- Task CRUD ---
@@ -516,16 +544,43 @@ export const App: React.FC = () => {
   };
 
   // --- Reset & Import Data ---
-  const handleResetAllData = () => {
+  const handleResetAllData = async () => {
+    // 1. Reset React states
     setGlobalState(INITIAL_GLOBAL_STATE);
     setCategories(INITIAL_CATEGORIES);
     setTasks(INITIAL_TASKS);
     setPenalties(INITIAL_PENALTIES);
     setActivityLogs(INITIAL_LOGS);
     setDayReasons(INITIAL_DAY_REASONS);
-    localStorage.clear();
     setSelectedCategoryId(null);
     setActiveTab('categories');
+
+    // 2. Clear local storage specifically
+    localStorage.setItem('liferpg_global_v3', JSON.stringify(INITIAL_GLOBAL_STATE));
+    localStorage.setItem('liferpg_categories_v3', JSON.stringify(INITIAL_CATEGORIES));
+    localStorage.setItem('liferpg_tasks_v3', JSON.stringify(INITIAL_TASKS));
+    localStorage.setItem('liferpg_penalties_v3', JSON.stringify(INITIAL_PENALTIES));
+    localStorage.setItem('liferpg_logs_v3', JSON.stringify(INITIAL_LOGS));
+    localStorage.setItem('liferpg_reasons_v3', JSON.stringify(INITIAL_DAY_REASONS));
+
+    // 3. Immediately persist clean zero state to Supabase
+    if (isSupabaseConfigured()) {
+      setCloudSyncStatus('syncing');
+      try {
+        await saveAppStateToSupabase({
+          globalState: INITIAL_GLOBAL_STATE,
+          categories: INITIAL_CATEGORIES,
+          tasks: INITIAL_TASKS,
+          penalties: INITIAL_PENALTIES,
+          activityLogs: INITIAL_LOGS,
+          dayReasons: INITIAL_DAY_REASONS,
+        });
+        setCloudSyncStatus('synced');
+      } catch (err) {
+        console.error('Failed to sync zero state to Supabase:', err);
+      }
+    }
+
     addToast('info', 'Система очищена', 'Все параметры сброшены в абсолютный ноль.');
   };
 
@@ -579,6 +634,7 @@ export const App: React.FC = () => {
                   onUpdateTask={handleUpdateTask}
                   onDeleteTask={handleDeleteTask}
                   onDeleteTaskInstance={handleDeleteTaskInstance}
+                  onDeleteCategory={handleDeleteCategory}
                   onSetDayReason={handleSetDayReason}
                   onBuyCategoryShopItem={handleBuyCategoryShopItem}
                   onOpenCategorySettings={() => {
@@ -591,6 +647,7 @@ export const App: React.FC = () => {
                   tasks={tasks}
                   onSelectCategory={(catId) => setSelectedCategoryId(catId)}
                   onAddCategory={handleAddCategory}
+                  onDeleteCategory={handleDeleteCategory}
                 />
               )}
             </>
