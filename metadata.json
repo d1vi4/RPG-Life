@@ -1,0 +1,6 @@
+{
+  "name": "LifeRPG - Календарь и Прогресс",
+  "description": "Геймифицированная RPG-система задач и категорий с интерактивным календарем, фиксацией в 00:00, званиями, магазином и синхронизацией.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
