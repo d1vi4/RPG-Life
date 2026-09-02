@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Header,
 } from './components/Header';
@@ -8,6 +8,7 @@ import { GlobalShopView } from './components/GlobalShopView';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ActivityLogView } from './components/ActivityLogView';
 import { PenaltyModal } from './components/PenaltyModal';
+import { GlobalCalendarModal } from './components/GlobalCalendarModal';
 import { Toast, ToastNotification } from './components/Toast';
 
 import {
@@ -112,9 +113,12 @@ export const App: React.FC = () => {
   // UI Navigation state
   const [activeTab, setActiveTab] = useState<'categories' | 'globalShop' | 'settings' | 'logs'>('categories');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [categoryInitialDate, setCategoryInitialDate] = useState<string | null>(null);
 
   // Modals & Sound
   const [isPenaltyModalOpen, setIsPenaltyModalOpen] = useState(false);
+  const [penaltyInitialCategoryId, setPenaltyInitialCategoryId] = useState<string | null>(null);
+  const [isGlobalCalendarOpen, setIsGlobalCalendarOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Toast notifications queue
@@ -134,6 +138,58 @@ export const App: React.FC = () => {
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // --- Browser Back Button Navigation & History Management ---
+  const isNavigatingFromHistory = useRef(false);
+
+  useEffect(() => {
+    // Initial history state setup
+    window.history.replaceState({ activeTab: 'categories', selectedCategoryId: null }, '');
+
+    const handlePopState = (event: PopStateEvent) => {
+      isNavigatingFromHistory.current = true;
+      if (isGlobalCalendarOpen) {
+        setIsGlobalCalendarOpen(false);
+        return;
+      }
+      if (isPenaltyModalOpen) {
+        setIsPenaltyModalOpen(false);
+        return;
+      }
+      if (event.state) {
+        if (event.state.selectedCategoryId !== undefined) {
+          setSelectedCategoryId(event.state.selectedCategoryId);
+        }
+        if (event.state.activeTab) {
+          setActiveTab(event.state.activeTab);
+        }
+      } else {
+        setSelectedCategoryId(null);
+        setActiveTab('categories');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isGlobalCalendarOpen, isPenaltyModalOpen]);
+
+  const handleSelectCategory = (catId: string | null, initialDate?: string) => {
+    setSelectedCategoryId(catId);
+    setCategoryInitialDate(initialDate || null);
+    if (!isNavigatingFromHistory.current) {
+      window.history.pushState({ activeTab: 'categories', selectedCategoryId: catId }, '');
+    }
+    isNavigatingFromHistory.current = false;
+  };
+
+  const handleTabChange = (tab: 'categories' | 'globalShop' | 'settings' | 'logs') => {
+    setActiveTab(tab);
+    setSelectedCategoryId(null);
+    if (!isNavigatingFromHistory.current) {
+      window.history.pushState({ activeTab: tab, selectedCategoryId: null }, '');
+    }
+    isNavigatingFromHistory.current = false;
   };
 
   // --- Initial Load from Supabase on App Mount ---
@@ -312,7 +368,7 @@ export const App: React.FC = () => {
           // Add level up log
           setActivityLogs((prev) => [
             {
-              id: `log-lvl-${Date.now()}`,
+              id: `log-lvl-${Date.now()}-${Math.random()}`,
               type: 'levelup',
               title: `Новое звание в «${c.name}»`,
               details: `Получен ранг «${nextProg.currentLevel?.name}»`,
@@ -410,7 +466,15 @@ export const App: React.FC = () => {
     );
   };
 
-  // --- Task CRUD ---
+  const handleReorderCategories = (newCategories: Category[]) => {
+    setCategories(newCategories);
+  };
+
+  const handleReorderTasks = (newTasks: Task[]) => {
+    setTasks(newTasks);
+  };
+
+  // --- Task CRUD & Cleanup on Deletion ---
   const handleAddTask = (newTaskData: Omit<Task, 'id'>) => {
     const newTask: Task = {
       ...newTaskData,
@@ -426,24 +490,124 @@ export const App: React.FC = () => {
     addToast('info', 'Задача обновлена', `Изменения в «${updatedTask.title}» сохранены.`);
   };
 
+  // When a task is deleted, cleanly deduct all XP, UXP, Title XP and Title UXP earned from it
   const handleDeleteTask = (taskId: string) => {
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+
+    // Calculate how many times this task was completed
+    let completedCount = 0;
+    if (targetTask.recurrence === 'none') {
+      completedCount = targetTask.isCompleted ? 1 : 0;
+    } else {
+      completedCount = (targetTask.completedDates || []).length;
+    }
+
+    const totalEarnedXP = completedCount * (targetTask.xpReward || 0);
+    const totalEarnedUXP = completedCount * (targetTask.uxpReward || 0);
+
+    // 1. Remove task from tasks state
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
-    addToast('info', 'Задача удалена', 'Задача была полностью удалена из расписания.');
+
+    // 2. If XP was earned, deduct from category XP and highestCategoryXP
+    if (totalEarnedXP > 0) {
+      setCategories((prevCategories) =>
+        prevCategories.map((c) => {
+          if (c.id !== targetTask.categoryId) return c;
+          const newXP = Math.max(0, (c.categoryXP || 0) - totalEarnedXP);
+          const newHighestXP = Math.max(0, (c.highestCategoryXP || 0) - totalEarnedXP);
+          return {
+            ...c,
+            categoryXP: newXP,
+            highestCategoryXP: newHighestXP,
+          };
+        })
+      );
+    }
+
+    // 3. If UXP was earned, deduct from global UXP and highestGlobalUXP
+    if (totalEarnedUXP > 0) {
+      setGlobalState((prev) => {
+        const newUXP = Math.max(0, (prev.globalUXP || 0) - totalEarnedUXP);
+        const newHighestUXP = Math.max(0, (prev.highestGlobalUXP || 0) - totalEarnedUXP);
+        return {
+          ...prev,
+          globalUXP: newUXP,
+          highestGlobalUXP: newHighestUXP,
+        };
+      });
+    }
+
+    // 4. Activity Log
+    setActivityLogs((prev) => [
+      {
+        id: `log-deltask-${Date.now()}-${Math.random()}`,
+        type: 'task_uncomplete',
+        title: 'Удаление задачи и списание наград',
+        details: `Удалена задача «${targetTask.title}» (${completedCount} выполнений). Списано: ${totalEarnedXP} XP и ${totalEarnedUXP} UXP.`,
+        timestamp: Date.now(),
+        xpChange: -totalEarnedXP,
+        uxpChange: -totalEarnedUXP,
+      },
+      ...prev,
+    ]);
+
+    addToast(
+      'info',
+      'Задача удалена',
+      totalEarnedXP > 0 || totalEarnedUXP > 0
+        ? `Удалена задача «${targetTask.title}». Награды (-${totalEarnedXP} XP, -${totalEarnedUXP} UXP) списаны с баланса и титула.`
+        : `Задача «${targetTask.title}» удалена.`
+    );
   };
 
   const handleDeleteTaskInstance = (taskId: string, dateStr: string) => {
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+
+    const isCompletedOnDate =
+      targetTask.recurrence === 'none'
+        ? !!targetTask.isCompleted
+        : (targetTask.completedDates || []).includes(dateStr);
+
+    const xpToDeduct = isCompletedOnDate ? targetTask.xpReward || 0 : 0;
+    const uxpToDeduct = isCompletedOnDate ? targetTask.uxpReward || 0 : 0;
+
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== taskId) return t;
         const excluded = t.excludedDates || [];
-        if (excluded.includes(dateStr)) return t;
+        const completed = t.completedDates || [];
         return {
           ...t,
-          excludedDates: [...excluded, dateStr],
+          excludedDates: excluded.includes(dateStr) ? excluded : [...excluded, dateStr],
+          completedDates: completed.filter((d) => d !== dateStr),
         };
       })
     );
-    addToast('info', 'Задача скрыта на дату', `Задача удалена только для дня ${dateStr}.`);
+
+    if (xpToDeduct > 0) {
+      setCategories((prevCategories) =>
+        prevCategories.map((c) => {
+          if (c.id !== targetTask.categoryId) return c;
+          return {
+            ...c,
+            categoryXP: Math.max(0, (c.categoryXP || 0) - xpToDeduct),
+            highestCategoryXP: Math.max(0, (c.highestCategoryXP || 0) - xpToDeduct),
+          };
+        })
+      );
+    }
+
+    if (uxpToDeduct > 0) {
+      setGlobalState((prev) => ({
+        ...prev,
+        globalUXP: Math.max(0, (prev.globalUXP || 0) - uxpToDeduct),
+        highestGlobalUXP: Math.max(0, (prev.highestGlobalUXP || 0) - uxpToDeduct),
+      }));
+    }
+
+    addToast('info', 'Задача скрыта на дату', `Задача удалена на день ${dateStr}.`);
   };
 
   // --- Skip Reason for Red Past Day ---
@@ -469,7 +633,7 @@ export const App: React.FC = () => {
 
     setActivityLogs((prev) => [
       {
-        id: `log-shop-${Date.now()}`,
+        id: `log-shop-${Date.now()}-${Math.random()}`,
         type: 'purchase',
         title: 'Покупка в магазине категории',
         details: `Куплено: «${item.name}» в «${cat.name}»`,
@@ -493,7 +657,7 @@ export const App: React.FC = () => {
 
     setActivityLogs((prev) => [
       {
-        id: `log-gshop-${Date.now()}`,
+        id: `log-gshop-${Date.now()}-${Math.random()}`,
         type: 'purchase',
         title: 'Покупка в общем UXP магазине',
         details: `Куплена награда: «${item.name}»`,
@@ -507,40 +671,91 @@ export const App: React.FC = () => {
     addToast('success', 'Элитная награда получена!', `Куплено: «${item.name}» за ${item.costUXP} UXP.`);
   };
 
-  // --- Penalties ---
-  const handleApplyPenalty = (penalty: Penalty, targetCategoryId?: string) => {
+  // --- Penalties Logic (Category XP + Title XP deduction OR Global UXP + Title UXP deduction) ---
+  const handleApplyPenalty = (
+    penalty: Penalty,
+    targetCategoryId?: string,
+    penaltyScope?: 'category' | 'global'
+  ) => {
     soundFX.playPenalty();
 
-    const targetCat = categories.find((c) => c.id === targetCategoryId) || categories[0];
+    const isGlobal = penaltyScope === 'global' || penalty.scope === 'global';
 
-    if (targetCat) {
-      setCategories((prev) =>
-        prev.map((c) => {
-          if (c.id !== targetCat.id) return c;
-          const newXP = Math.max(0, c.categoryXP - penalty.xpDeduction);
-          return { ...c, categoryXP: newXP };
-        })
+    if (isGlobal) {
+      // Global penalty: Deduct from globalUXP AND highestGlobalUXP
+      const uxpDeduct = penalty.xpDeduction;
+
+      setGlobalState((prev) => {
+        const newUXP = Math.max(0, (prev.globalUXP || 0) - uxpDeduct);
+        const newHighestUXP = Math.max(0, (prev.highestGlobalUXP || 0) - uxpDeduct);
+        return {
+          ...prev,
+          globalUXP: newUXP,
+          highestGlobalUXP: newHighestUXP,
+        };
+      });
+
+      setActivityLogs((prev) => [
+        {
+          id: `log-pen-global-${Date.now()}-${Math.random()}`,
+          type: 'penalty',
+          title: `Глобальный штраф: ${penalty.name}`,
+          details: `${penalty.actionDescription} (-${uxpDeduct} UXP с баланса и титульного рекорда)`,
+          timestamp: Date.now(),
+          xpChange: 0,
+          uxpChange: -uxpDeduct,
+        },
+        ...prev,
+      ]);
+
+      addToast(
+        'penalty',
+        `Глобальный штраф: -${uxpDeduct} UXP`,
+        `${penalty.name}: ${penalty.actionDescription} (списано с баланса и титула)`
       );
+    } else {
+      // Category penalty: Deduct from categoryXP AND highestCategoryXP of the specific category
+      const targetCat =
+        categories.find((c) => c.id === targetCategoryId) ||
+        categories.find((c) => c.id === penalty.targetCategoryId) ||
+        categories[0];
+
+      if (targetCat) {
+        const xpDeduct = penalty.xpDeduction;
+
+        setCategories((prev) =>
+          prev.map((c) => {
+            if (c.id !== targetCat.id) return c;
+            const newXP = Math.max(0, (c.categoryXP || 0) - xpDeduct);
+            const newHighestXP = Math.max(0, (c.highestCategoryXP || 0) - xpDeduct);
+            return {
+              ...c,
+              categoryXP: newXP,
+              highestCategoryXP: newHighestXP,
+            };
+          })
+        );
+
+        setActivityLogs((prev) => [
+          {
+            id: `log-pen-cat-${Date.now()}-${Math.random()}`,
+            type: 'penalty',
+            title: `Штраф категории «${targetCat.name}»: ${penalty.name}`,
+            details: `${penalty.actionDescription} (-${xpDeduct} XP с баланса и титульного рекорда категории)`,
+            timestamp: Date.now(),
+            xpChange: -xpDeduct,
+            uxpChange: 0,
+          },
+          ...prev,
+        ]);
+
+        addToast(
+          'penalty',
+          `Штраф в «${targetCat.name}»: -${xpDeduct} XP`,
+          `${penalty.name}: ${penalty.actionDescription} (списано с баланса и титула)`
+        );
+      }
     }
-
-    setActivityLogs((prev) => [
-      {
-        id: `log-pen-${Date.now()}`,
-        type: 'penalty',
-        title: `Штраф: ${penalty.name}`,
-        details: `${penalty.actionDescription} ${targetCat ? `(категория: ${targetCat.name})` : ''}`,
-        timestamp: Date.now(),
-        xpChange: -penalty.xpDeduction,
-        uxpChange: 0,
-      },
-      ...prev,
-    ]);
-
-    addToast(
-      'penalty',
-      `Штраф применен: -${penalty.xpDeduction} XP`,
-      penalty.actionDescription
-    );
   };
 
   // --- Reset & Import Data ---
@@ -607,18 +822,18 @@ export const App: React.FC = () => {
         globalState={globalState}
         categories={categories}
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setSelectedCategoryId(null);
+        onTabChange={handleTabChange}
+        onOpenPenaltyModal={() => {
+          setPenaltyInitialCategoryId(selectedCategoryId);
+          setIsPenaltyModalOpen(true);
         }}
-        onOpenPenaltyModal={() => setIsPenaltyModalOpen(true)}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled((prev) => !prev)}
         cloudSyncStatus={cloudSyncStatus}
       />
 
-      {/* Main Content Area */}
-      <main className="lg:pl-72 flex-1 flex flex-col min-w-0">
+      {/* Main Content Area with bottom padding for mobile navigation */}
+      <main className="lg:pl-72 flex-1 flex flex-col min-w-0 pb-24 lg:pb-8">
         <div className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           {/* VIEW ROUTING */}
           {activeTab === 'categories' && (
@@ -628,7 +843,8 @@ export const App: React.FC = () => {
                   category={activeCategory}
                   tasks={tasks}
                   dayReasons={dayReasons}
-                  onBack={() => setSelectedCategoryId(null)}
+                  initialSelectedDate={categoryInitialDate || undefined}
+                  onBack={() => handleSelectCategory(null)}
                   onToggleTask={handleToggleTask}
                   onAddTask={handleAddTask}
                   onUpdateTask={handleUpdateTask}
@@ -637,17 +853,22 @@ export const App: React.FC = () => {
                   onDeleteCategory={handleDeleteCategory}
                   onSetDayReason={handleSetDayReason}
                   onBuyCategoryShopItem={handleBuyCategoryShopItem}
-                  onOpenCategorySettings={() => {
-                    setActiveTab('settings');
+                  onOpenCategorySettings={() => handleTabChange('settings')}
+                  onOpenPenaltyModal={(catId) => {
+                    setPenaltyInitialCategoryId(catId || selectedCategoryId);
+                    setIsPenaltyModalOpen(true);
                   }}
+                  onReorderTasks={handleReorderTasks}
                 />
               ) : (
                 <CategoryGrid
                   categories={categories}
                   tasks={tasks}
-                  onSelectCategory={(catId) => setSelectedCategoryId(catId)}
+                  onSelectCategory={(catId) => handleSelectCategory(catId)}
                   onAddCategory={handleAddCategory}
                   onDeleteCategory={handleDeleteCategory}
+                  onReorderCategories={handleReorderCategories}
+                  onOpenGlobalCalendar={() => setIsGlobalCalendarOpen(true)}
                 />
               )}
             </>
@@ -657,7 +878,7 @@ export const App: React.FC = () => {
             <GlobalShopView
               globalState={globalState}
               onBuyItem={handleBuyGlobalShopItem}
-              onNavigateToSettings={() => setActiveTab('settings')}
+              onNavigateToSettings={() => handleTabChange('settings')}
             />
           )}
 
@@ -685,12 +906,29 @@ export const App: React.FC = () => {
         </div>
       </main>
 
+      {/* Global Calendar Modal across all categories */}
+      <GlobalCalendarModal
+        isOpen={isGlobalCalendarOpen}
+        onClose={() => setIsGlobalCalendarOpen(false)}
+        categories={categories}
+        tasks={tasks}
+        onSelectCategoryOnDate={(categoryId, dateStr) => {
+          setIsGlobalCalendarOpen(false);
+          setActiveTab('categories');
+          handleSelectCategory(categoryId, dateStr);
+        }}
+      />
+
       {/* Penalty Modal */}
       <PenaltyModal
         isOpen={isPenaltyModalOpen}
-        onClose={() => setIsPenaltyModalOpen(false)}
+        onClose={() => {
+          setIsPenaltyModalOpen(false);
+          setPenaltyInitialCategoryId(null);
+        }}
         penalties={penalties}
         categories={categories}
+        initialCategoryId={penaltyInitialCategoryId}
         onApplyPenalty={handleApplyPenalty}
       />
     </div>
@@ -698,3 +936,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+

@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,12 +20,11 @@ import {
   Trash2,
   X,
   FileText,
-  CalendarCheck,
-  CalendarX,
-  HelpCircle,
   CheckCircle2,
   AlertTriangle,
   ShieldAlert,
+  GripVertical,
+  Flame,
 } from 'lucide-react';
 import { Category, CategoryShopItem, Task, TaskDifficulty, TaskRecurrence } from '../types';
 import { DynamicIcon } from './DynamicIcon';
@@ -39,6 +38,7 @@ interface CategoryViewProps {
   category: Category;
   tasks: Task[];
   dayReasons: Record<string, string>;
+  initialSelectedDate?: string;
   onBack: () => void;
   onToggleTask: (taskId: string, date: string, note?: string, event?: React.MouseEvent) => void;
   onAddTask: (task: Omit<Task, 'id'>) => void;
@@ -49,12 +49,15 @@ interface CategoryViewProps {
   onSetDayReason: (categoryId: string, date: string, reason: string) => void;
   onBuyCategoryShopItem: (categoryId: string, item: CategoryShopItem) => void;
   onOpenCategorySettings: () => void;
+  onOpenPenaltyModal?: (categoryId?: string) => void;
+  onReorderTasks?: (tasks: Task[]) => void;
 }
 
 export const CategoryView: React.FC<CategoryViewProps> = ({
   category,
   tasks,
   dayReasons,
+  initialSelectedDate,
   onBack,
   onToggleTask,
   onAddTask,
@@ -65,6 +68,8 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
   onSetDayReason,
   onBuyCategoryShopItem,
   onOpenCategorySettings,
+  onOpenPenaltyModal,
+  onReorderTasks,
 }) => {
   const todayStr = getTodayDateString();
   const [activeTab, setActiveTab] = useState<'calendar' | 'shop' | 'levels'>('calendar');
@@ -74,8 +79,19 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
   const [deleteCategoryStep, setDeleteCategoryStep] = useState<1 | 2>(1);
 
   // Selected Day Modal State
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [isDayModalOpen, setIsDayModalOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>(initialSelectedDate || todayStr);
+  const [isDayModalOpen, setIsDayModalOpen] = useState(Boolean(initialSelectedDate && initialSelectedDate !== todayStr));
+
+  useEffect(() => {
+    if (initialSelectedDate) {
+      setSelectedDate(initialSelectedDate);
+      const [y, m] = initialSelectedDate.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m)) {
+        setCurrentYear(y);
+        setCurrentMonth(m - 1);
+      }
+    }
+  }, [initialSelectedDate]);
 
   // Recurring task delete modal state
   const [taskToDelete, setTaskToDelete] = useState<{ task: Task; dateStr: string } | null>(null);
@@ -97,13 +113,6 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
 
   // Editing Task state
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-
-  // Completion note prompt modal state
-  const [completingTaskInfo, setCompletingTaskInfo] = useState<{
-    task: Task;
-    date: string;
-    note: string;
-  } | null>(null);
 
   // Skip reason input modal state for past red days
   const [skipReasonModalDate, setSkipReasonModalDate] = useState<string | null>(null);
@@ -161,13 +170,6 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
 
   /**
    * Calculate Day Status for Calendar Cell:
-   * Returns:
-   * - status: 'green' | 'red' | 'gray' | 'neutral'
-   * - isPast: boolean
-   * - isToday: boolean
-   * - totalTasks: number
-   * - completedCount: number
-   * - reason?: string
    */
   const getDayStatus = (dateStr: string) => {
     const isToday = dateStr === todayStr;
@@ -204,74 +206,83 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
       isToday,
       totalTasks,
       completedCount,
-      isAllCompleted,
       reason,
     };
   };
 
-  // Calendar month days calculation
+  /**
+   * Build calendar days for the current displayed month
+   */
   const calendarDays = useMemo(() => {
     const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
     const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
 
-    // Days in current month
-    const numDays = lastDayOfMonth.getDate();
+    const totalDays = lastDayOfMonth.getDate();
+    let startDayOfWeek = firstDayOfMonth.getDay(); // 0 = Sun, 1 = Mon ...
+    startDayOfWeek = startDayOfWeek === 0 ? 7 : startDayOfWeek; // 1 = Mon ... 7 = Sun
 
-    // Day of week of the 1st of this month (1 = Monday, 7 = Sunday)
-    let startDayOfWeek = firstDayOfMonth.getDay();
-    startDayOfWeek = startDayOfWeek === 0 ? 7 : startDayOfWeek;
-
-    // Previous month padding
-    const prevMonthDays: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
     const prevMonthLastDay = new Date(currentYear, currentMonth, 0).getDate();
+
+    const days: Array<{
+      dateStr: string;
+      dayNum: number;
+      isCurrentMonth: boolean;
+    }> = [];
+
+    // Fill preceding days from previous month
     for (let i = startDayOfWeek - 1; i > 0; i--) {
       const d = prevMonthLastDay - i + 1;
-      const prevDate = new Date(currentYear, currentMonth - 1, d);
-      const y = prevDate.getFullYear();
-      const m = String(prevDate.getMonth() + 1).padStart(2, '0');
-      const day = String(d).padStart(2, '0');
-      prevMonthDays.push({
-        dateStr: `${y}-${m}-${day}`,
+      const prevM = currentMonth === 0 ? 11 : currentMonth - 1;
+      const prevY = currentMonth === 0 ? currentYear - 1 : currentYear;
+      const dateStr = `${prevY}-${String(prevM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        dateStr,
         dayNum: d,
         isCurrentMonth: false,
       });
     }
 
-    // Current month days
-    const currentMonthDays: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
-    for (let d = 1; d <= numDays; d++) {
-      const y = currentYear;
-      const m = String(currentMonth + 1).padStart(2, '0');
-      const day = String(d).padStart(2, '0');
-      currentMonthDays.push({
-        dateStr: `${y}-${m}-${day}`,
+    // Fill current month days
+    for (let d = 1; d <= totalDays; d++) {
+      const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        dateStr,
         dayNum: d,
         isCurrentMonth: true,
       });
     }
 
-    // Next month padding to fill a complete 7-col grid (up to 35 or 42 cells)
-    const totalCurrentCells = prevMonthDays.length + currentMonthDays.length;
-    const remaining = (7 - (totalCurrentCells % 7)) % 7;
-    const nextMonthDays: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
-    for (let d = 1; d <= remaining; d++) {
-      const nextDate = new Date(currentYear, currentMonth + 1, d);
-      const y = nextDate.getFullYear();
-      const m = String(nextDate.getMonth() + 1).padStart(2, '0');
-      const day = String(d).padStart(2, '0');
-      nextMonthDays.push({
-        dateStr: `${y}-${m}-${day}`,
-        dayNum: d,
-        isCurrentMonth: false,
-      });
+    // Fill subsequent days to complete grid rows
+    const remaining = 7 - (days.length % 7);
+    if (remaining < 7) {
+      for (let d = 1; d <= remaining; d++) {
+        const nextM = currentMonth === 11 ? 0 : currentMonth + 1;
+        const nextY = currentMonth === 11 ? currentYear + 1 : currentYear;
+        const dateStr = `${nextY}-${String(nextM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        days.push({
+          dateStr,
+          dayNum: d,
+          isCurrentMonth: false,
+        });
+      }
     }
 
-    return [...prevMonthDays, ...currentMonthDays, ...nextMonthDays];
+    return days;
   }, [currentYear, currentMonth]);
 
   const monthNames = [
-    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+    'Январь',
+    'Февраль',
+    'Март',
+    'Апрель',
+    'Май',
+    'Июнь',
+    'Июль',
+    'Август',
+    'Сентябрь',
+    'Октябрь',
+    'Ноябрь',
+    'Декабрь',
   ];
 
   const handlePrevMonth = () => {
@@ -299,41 +310,38 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
     setSelectedDate(todayStr);
   };
 
-  // Click on a calendar day
   const handleDayClick = (dateStr: string) => {
     setSelectedDate(dateStr);
     setIsDayModalOpen(true);
   };
 
-  // Open task creation form
-  const handleOpenAddModal = (initialDate?: string) => {
-    setTaskDate(initialDate || selectedDate || todayStr);
+  // Open modal to add task for specific date
+  const handleOpenAddModal = (dateStr?: string) => {
+    setTaskDate(dateStr || selectedDate || todayStr);
     setTitle('');
-    setNotes('');
     setXpReward(100);
     setUxpReward(15);
     setRecurrence('none');
-    setRepeatDays([1, 2, 3, 4, 5]);
+    setNotes('');
     setIsAddModalOpen(true);
   };
 
-  // Submit task creation
+  // Create new task in this category
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     onAddTask({
-      categoryId: category.id,
       title: title.trim(),
+      categoryId: category.id,
       xpReward: Number(xpReward) || 0,
       uxpReward: Number(uxpReward) || 0,
-      date: taskDate || todayStr,
+      difficulty,
       recurrence,
       repeatDays: recurrence === 'weekly' ? repeatDays : undefined,
-      difficulty,
+      date: recurrence === 'none' ? taskDate : undefined,
       notes: notes.trim() || undefined,
       isCompleted: false,
-      completedDates: [],
     });
 
     setIsAddModalOpen(false);
@@ -346,26 +354,18 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
     );
   };
 
-  // Trigger task checkbox toggle
+  // Instant task toggle (no completion note prompt)
   const handleTaskCheckboxClick = (task: Task, dateStr: string, event: React.MouseEvent) => {
     const isPast = dateStr < todayStr;
     if (isPast) {
-      // Past days are locked in 00:00!
+      // Past days are locked at 00:00
       return;
     }
 
     const isCompleted = isTaskCompletedOnDate(task, dateStr);
 
     if (!isCompleted) {
-      // Prompt for optional completion note
-      const currentNote = getTaskNoteOnDate(task, dateStr) || '';
-      setCompletingTaskInfo({
-        task,
-        date: dateStr,
-        note: currentNote,
-      });
-
-      // Also trigger particle rewards
+      // Trigger floating particle rewards
       const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
       const x = rect.left + rect.width / 2;
       const y = rect.top;
@@ -380,28 +380,9 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
           y,
         },
       ]);
-    } else {
-      // Uncompleting task
-      onToggleTask(task.id, dateStr, undefined, event);
     }
-  };
 
-  // Confirm completion with note
-  const handleConfirmCompletionNote = () => {
-    if (!completingTaskInfo) return;
-    onToggleTask(
-      completingTaskInfo.task.id,
-      completingTaskInfo.date,
-      completingTaskInfo.note.trim() || undefined
-    );
-    setCompletingTaskInfo(null);
-  };
-
-  // Skip note and just complete
-  const handleQuickComplete = () => {
-    if (!completingTaskInfo) return;
-    onToggleTask(completingTaskInfo.task.id, completingTaskInfo.date, undefined);
-    setCompletingTaskInfo(null);
+    onToggleTask(task.id, dateStr, undefined, event);
   };
 
   // Save reason for red skipped day
@@ -445,6 +426,13 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
   const selectedDayInfo = getDayStatus(selectedDate);
   const selectedDayTasks = getTasksForDate(selectedDate);
 
+  const handleReorderSelectedDayTasks = (reordered: Task[]) => {
+    if (!onReorderTasks) return;
+    const reorderedIds = new Set(reordered.map((t) => t.id));
+    const nonDayTasks = tasks.filter((t) => !reorderedIds.has(t.id));
+    onReorderTasks([...reordered, ...nonDayTasks]);
+  };
+
   const WEEK_DAYS = [
     { num: 1, label: 'Пн' },
     { num: 2, label: 'Вт' },
@@ -463,23 +451,23 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
         onComplete={(id) => setFloatingRewards((prev) => prev.filter((r) => r.id !== id))}
       />
 
-      {/* Top Banner with Back Button & Category Details */}
+      {/* Top Banner with Back Button, Category Details & Quick Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0F172A] p-5 rounded-2xl border border-slate-800 relative overflow-hidden">
         <div
           className="absolute -top-24 -right-24 w-72 h-72 rounded-full opacity-10 blur-3xl pointer-events-none"
           style={{ backgroundColor: category.color }}
         />
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 min-w-0 flex-1">
           <button
             onClick={onBack}
-            className="p-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="p-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
             title="Назад ко всем направлениям"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div
               className="w-12 h-12 rounded-2xl flex items-center justify-center border shadow-lg shrink-0"
               style={{
@@ -491,11 +479,11 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               <DynamicIcon name={category.icon} className="w-6 h-6" />
             </div>
 
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-gamer font-bold text-xl text-white">{category.name}</h2>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-gamer font-bold text-xl text-white truncate">{category.name}</h2>
                 <span
-                  className="px-2.5 py-0.5 rounded-full text-xs font-mono-code font-bold border"
+                  className="px-2.5 py-0.5 rounded-full text-xs font-mono-code font-bold border shrink-0"
                   style={{
                     backgroundColor: `${category.color}15`,
                     borderColor: `${category.color}40`,
@@ -505,14 +493,14 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
                   {prog.currentLevel ? prog.currentLevel.name : 'Без звания'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
                 {category.description || 'Изолированное направление с интерактивным календарем'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Category Stats: Balance & Level Progress + Category Delete Button */}
+        {/* Category Stats & Penalty Action Button */}
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           {/* Spendable balance */}
           <div className="flex items-center gap-2 bg-[#0B0F19] px-3.5 py-2 rounded-xl border border-emerald-500/30">
@@ -530,13 +518,26 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
             <Award className="w-4 h-4 text-indigo-400 shrink-0" />
             <div>
               <span className="text-[9px] font-gamer text-indigo-300 block uppercase flex items-center gap-1">
-                <span>Титульный XP (Рекорд)</span>
+                <span>Титульный XP</span>
               </span>
               <span className="text-xs font-mono-code font-bold text-indigo-300">
                 {(category.highestCategoryXP || category.categoryXP).toLocaleString()} XP
               </span>
             </div>
           </div>
+
+          {/* Category Penalty Button */}
+          {onOpenPenaltyModal && (
+            <button
+              type="button"
+              onClick={() => onOpenPenaltyModal(category.id)}
+              className="p-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-gamer"
+              title="Наложить штраф на это направление (XP и Титул)"
+            >
+              <Flame className="w-4 h-4 text-rose-400" />
+              <span>ШТРАФ</span>
+            </button>
+          )}
 
           {/* Delete Category Button */}
           <button
@@ -558,7 +559,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
       <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors shrink-0 ${
             activeTab === 'calendar'
               ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800/80'
@@ -570,7 +571,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
 
         <button
           onClick={() => setActiveTab('shop')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors shrink-0 ${
             activeTab === 'shop'
               ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800/80'
@@ -582,7 +583,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
 
         <button
           onClick={() => setActiveTab('levels')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-gamer font-bold cursor-pointer transition-colors shrink-0 ${
             activeTab === 'levels'
               ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800/80'
@@ -763,7 +764,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
           <div className="bg-[#0F172A] p-4 rounded-xl border border-slate-800 flex items-start gap-3 text-xs text-slate-400">
             <Clock className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-slate-200">Механика фиксации в 00:00:</strong> В течение текущего дня задачи можно свободно выполнять и снимать. Как только наступают следующие сутки (00:00), день становится прошедшим и окончательно получает статус (🟢 Выполнен или 🔴 Пропущен), а редактирование задач за прошлый день блокируется. Для красного дня можно указать уважительную причину, чтобы сделать его серым ⚪.
+              <strong className="text-slate-200">Механика фиксации в 00:00:</strong> В течение текущего дня задачи можно мгновенно выполнять кликом и отменять. Как только наступают следующие сутки (00:00), день окончательно фиксируется (🟢 Выполнен или 🔴 Пропущен), а задачи блокируются от редактирования. Для красного дня можно указать уважительную причину, чтобы сделать его нейтральным серым ⚪.
             </p>
           </div>
         </div>
@@ -772,7 +773,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
       {/* TAB 2: ISOLATED CATEGORY SHOP (XP) */}
       {activeTab === 'shop' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between bg-[#0F172A] p-4 rounded-xl border border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0F172A] p-4 rounded-xl border border-slate-800">
             <div>
               <h3 className="font-gamer font-bold text-sm text-white">
                 МАГАЗИН НАПРАВЛЕНИЯ: {category.name.toUpperCase()}
@@ -782,7 +783,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-2 bg-[#0B0F19] px-3 py-1.5 rounded-lg border border-emerald-500/30 font-mono-code font-bold text-emerald-400 text-sm">
+            <div className="flex items-center gap-2 bg-[#0B0F19] px-3 py-1.5 rounded-lg border border-emerald-500/30 font-mono-code font-bold text-emerald-400 text-sm shrink-0">
               <Coins className="w-4 h-4" />
               <span>{category.categoryXP.toLocaleString()} XP</span>
             </div>
@@ -859,7 +860,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               <span>ЗВАНИЯ КАТЕГОРИИ (XP ИЕРАРХИЯ)</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5 mb-4">
-              Ранг категории рассчитывается по историческому рекорду XP ({category.highestCategoryXP} XP) и является несгораемым.
+              Ранг категории рассчитывается по историческому рекорду XP ({category.highestCategoryXP} XP).
             </p>
 
             {(category.levels || []).length === 0 ? (
@@ -869,7 +870,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
             ) : (
               <div className="space-y-2.5">
                 {(category.levels || []).map((lvl) => {
-                  const isAchieved = category.highestCategoryXP >= lvl.requiredXP;
+                  const isAchieved = (category.highestCategoryXP || 0) >= lvl.requiredXP;
                   const isCurrent = prog.currentLevel?.id === lvl.id;
 
                   return (
@@ -1002,7 +1003,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               </div>
             )}
 
-            {/* Action to Add Task for this day (available if not locked past or anytime) */}
+            {/* Action to Add Task for this day (available if not locked past) */}
             {!selectedDayInfo.isPast && (
               <div className="flex justify-end">
                 <button
@@ -1015,7 +1016,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               </div>
             )}
 
-            {/* Tasks List */}
+            {/* Tasks List with Drag & Drop Reordering */}
             {selectedDayTasks.length === 0 ? (
               <div className="p-8 text-center bg-[#0B0F19] rounded-xl border border-dashed border-slate-800 text-slate-400">
                 <CalendarIcon className="w-7 h-7 mx-auto text-slate-500 mb-2" />
@@ -1030,129 +1031,149 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
                 )}
               </div>
             ) : (
-              <div className="space-y-3">
+              <Reorder.Group
+                axis="y"
+                values={selectedDayTasks}
+                onReorder={handleReorderSelectedDayTasks}
+                className="space-y-3"
+              >
                 {selectedDayTasks.map((task) => {
                   const isCompleted = isTaskCompletedOnDate(task, selectedDate);
                   const completionNote = getTaskNoteOnDate(task, selectedDate);
                   const isLocked = selectedDayInfo.isPast;
 
                   return (
-                    <div
+                    <Reorder.Item
                       key={task.id}
-                      className={`p-4 rounded-xl border transition-all ${
-                        isCompleted
-                          ? 'border-emerald-500/30 bg-emerald-950/15'
-                          : isLocked
-                          ? 'border-rose-500/20 bg-rose-950/10 opacity-75'
-                          : 'border-slate-800 bg-[#0B0F19] hover:border-slate-700'
-                      }`}
+                      value={task}
+                      whileDrag={{ scale: 1.02, zIndex: 30, boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
+                      className="list-none"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 min-w-0 flex-1">
-                          <button
-                            disabled={isLocked}
-                            onClick={(e) => handleTaskCheckboxClick(task, selectedDate, e)}
-                            className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
-                              isCompleted
-                                ? 'border-emerald-400 bg-emerald-400 text-slate-950 shadow-[0_0_8px_rgba(52,211,153,0.4)]'
-                                : isLocked
-                                ? 'border-slate-800 bg-slate-900 text-slate-600 cursor-not-allowed'
-                                : 'border-slate-700 bg-slate-900 text-transparent hover:border-sky-400 hover:text-sky-400/40 cursor-pointer'
-                            }`}
-                            title={isLocked ? 'День заблокирован в 00:00' : 'Отметить выполнение'}
-                          >
-                            <Check className="h-4 w-4 stroke-[3]" />
-                          </button>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h4
-                                className={`font-gamer font-bold text-sm transition-all ${
-                                  isCompleted ? 'text-slate-400 line-through' : 'text-white'
-                                }`}
+                      <div
+                        className={`p-4 rounded-xl border transition-all ${
+                          isCompleted
+                            ? 'border-emerald-500/30 bg-emerald-950/15'
+                            : isLocked
+                            ? 'border-rose-500/20 bg-rose-950/10 opacity-75'
+                            : 'border-slate-800 bg-[#0B0F19] hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            {!isLocked && (
+                              <div
+                                className="cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 pt-1 shrink-0"
+                                title="Перетащите для изменения порядка"
                               >
-                                {task.title}
-                              </h4>
-
-                              {task.recurrence === 'daily' && (
-                                <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                                  Каждый день
-                                </span>
-                              )}
-
-                              {task.recurrence === 'weekly' && (
-                                <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-                                  По дням недели
-                                </span>
-                              )}
-
-                              {task.difficulty && (
-                                <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-                                  {task.difficulty}
-                                </span>
-                              )}
-                            </div>
-
-                            {task.notes && (
-                              <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                                {task.notes}
-                              </p>
+                                <GripVertical className="w-4 h-4" />
+                              </div>
                             )}
 
-                            {/* Display Completion Note if exists */}
-                            {completionNote && (
-                              <div className="mt-2 text-xs bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-lg text-emerald-300 flex items-start gap-1.5">
-                                <MessageSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                                <div>
-                                  <strong className="text-[10px] uppercase font-gamer block text-emerald-400">
-                                    Заметка к выполнению:
-                                  </strong>
-                                  <span>{completionNote}</span>
+                            <button
+                              disabled={isLocked}
+                              onClick={(e) => handleTaskCheckboxClick(task, selectedDate, e)}
+                              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
+                                isCompleted
+                                  ? 'border-emerald-400 bg-emerald-400 text-slate-950 shadow-[0_0_8px_rgba(52,211,153,0.4)]'
+                                  : isLocked
+                                  ? 'border-slate-800 bg-slate-900 text-slate-600 cursor-not-allowed'
+                                  : 'border-slate-700 bg-slate-900 text-transparent hover:border-sky-400 hover:text-sky-400/40 cursor-pointer'
+                              }`}
+                              title={isLocked ? 'День заблокирован в 00:00' : 'Отметить выполнение (мгновенно)'}
+                            >
+                              <Check className="h-4 w-4 stroke-[3]" />
+                            </button>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4
+                                  className={`font-gamer font-bold text-sm transition-all ${
+                                    isCompleted ? 'text-slate-400 line-through' : 'text-white'
+                                  }`}
+                                >
+                                  {task.title}
+                                </h4>
+
+                                {task.recurrence === 'daily' && (
+                                  <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                                    Каждый день
+                                  </span>
+                                )}
+
+                                {task.recurrence === 'weekly' && (
+                                  <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                    По дням недели
+                                  </span>
+                                )}
+
+                                {task.difficulty && (
+                                  <span className="text-[10px] font-mono-code px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                                    {task.difficulty}
+                                  </span>
+                                )}
+                              </div>
+
+                              {task.notes && (
+                                <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                                  {task.notes}
+                                </p>
+                              )}
+
+                              {/* Display Completion Note if exists */}
+                              {completionNote && (
+                                <div className="mt-2 text-xs bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-lg text-emerald-300 flex items-start gap-1.5">
+                                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <strong className="text-[10px] uppercase font-gamer block text-emerald-400">
+                                      Заметка:
+                                    </strong>
+                                    <span>{completionNote}</span>
+                                  </div>
                                 </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Rewards & Edit Controls */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono-code font-bold text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg">
+                              +{task.xpReward} XP
+                            </span>
+                            <span className="font-mono-code font-bold text-xs text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-lg">
+                              +{task.uxpReward} UXP
+                            </span>
+
+                            {!isLocked && (
+                              <div className="flex items-center gap-1 ml-1">
+                                <button
+                                  onClick={() => setEditingTask(task)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-white cursor-pointer hover:bg-slate-800"
+                                  title="Редактировать"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (task.recurrence !== 'none') {
+                                      setTaskToDelete({ task, dateStr: selectedDate });
+                                    } else {
+                                      onDeleteTask(task.id);
+                                    }
+                                  }}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 cursor-pointer hover:bg-slate-800"
+                                  title="Удалить"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
-
-                        {/* Rewards & Edit Controls */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-mono-code font-bold text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg">
-                            +{task.xpReward} XP
-                          </span>
-                          <span className="font-mono-code font-bold text-xs text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-lg">
-                            +{task.uxpReward} UXP
-                          </span>
-
-                          {!isLocked && (
-                            <div className="flex items-center gap-1 ml-1">
-                              <button
-                                onClick={() => setEditingTask(task)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-white cursor-pointer hover:bg-slate-800"
-                                title="Редактировать"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (task.recurrence !== 'none') {
-                                    setTaskToDelete({ task, dateStr: selectedDate });
-                                  } else {
-                                    onDeleteTask(task.id);
-                                  }
-                                }}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 cursor-pointer hover:bg-slate-800"
-                                title="Удалить"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
                       </div>
-                    </div>
+                    </Reorder.Item>
                   );
                 })}
-              </div>
+              </Reorder.Group>
             )}
 
             <div className="flex justify-end pt-3 border-t border-slate-800">
@@ -1168,7 +1189,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 2: TASK CREATION MODAL (Rich Recurrence, Notes & Rewards) */}
+      {/* MODAL 2: TASK CREATION MODAL */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <motion.div
@@ -1248,25 +1269,25 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
 
               {/* If weekly recurrence: Day Checkboxes */}
               {recurrence === 'weekly' && (
-                <div className="bg-[#0B0F19] p-3 rounded-xl border border-slate-800 space-y-2">
-                  <label className="block text-slate-300 font-gamer font-bold text-[11px] uppercase">
-                    Выберите дни недели для повторения:
+                <div>
+                  <label className="block text-slate-300 font-gamer font-bold mb-1">
+                    Дни недели для выполнения:
                   </label>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {WEEK_DAYS.map((wd) => {
-                      const isSelected = repeatDays.includes(wd.num);
+                  <div className="flex gap-2">
+                    {WEEK_DAYS.map((w) => {
+                      const isSelected = repeatDays.includes(w.num);
                       return (
                         <button
-                          key={wd.num}
+                          key={w.num}
                           type="button"
-                          onClick={() => handleToggleRepeatDay(wd.num)}
-                          className={`w-9 h-9 rounded-xl font-mono-code font-bold text-xs border transition-all cursor-pointer ${
+                          onClick={() => handleToggleRepeatDay(w.num)}
+                          className={`flex-1 py-1.5 rounded-lg font-mono-code font-bold text-xs border transition-all cursor-pointer ${
                             isSelected
-                              ? 'border-indigo-400 bg-indigo-500/30 text-indigo-200'
-                              : 'border-slate-800 bg-[#0F172A] text-slate-400 hover:text-white'
+                              ? 'border-sky-400 bg-sky-500/20 text-sky-300'
+                              : 'border-slate-800 bg-[#0B0F19] text-slate-400'
                           }`}
                         >
-                          {wd.label}
+                          {w.label}
                         </button>
                       );
                     })}
@@ -1274,23 +1295,24 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
                 </div>
               )}
 
-              {/* If single recurrence: Specific Date picker */}
+              {/* If single date task: Date picker */}
               {recurrence === 'none' && (
                 <div>
                   <label className="block text-slate-300 font-gamer font-bold mb-1">Дата выполнения</label>
                   <input
                     type="date"
+                    required
                     value={taskDate}
                     onChange={(e) => setTaskDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-[#0B0F19] px-3.5 py-2 text-white font-mono-code focus:border-sky-400 focus:outline-none text-xs"
+                    className="w-full rounded-xl border border-slate-700 bg-[#0B0F19] px-3.5 py-2 text-white focus:border-sky-400 focus:outline-none text-xs"
                   />
                 </div>
               )}
 
-              {/* Rewards & Difficulty */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Rewards (Category XP + Global UXP) */}
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-gamer font-bold mb-1">Награда XP (в категорию)</label>
+                  <label className="block text-slate-300 font-gamer font-bold mb-1">Награда XP (категория)</label>
                   <input
                     type="number"
                     min={0}
@@ -1357,62 +1379,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 3: COMPLETION NOTE PROMPT MODAL */}
-      {completingTaskInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-md bg-[#0F172A] border border-slate-800 rounded-2xl p-6 shadow-2xl text-slate-100 space-y-4"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-gamer font-bold text-base text-white">ЗАДАЧА ВЫПОЛНЕНА!</h3>
-                <p className="text-xs text-slate-400 truncate max-w-[240px]">
-                  {completingTaskInfo.task.title}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-gamer font-bold text-xs mb-1.5">
-                Оставить заметку к выполненной задаче:
-              </label>
-              <textarea
-                rows={3}
-                placeholder="Что получилось? Какие выводы или ссылки стоит сохранить..."
-                value={completingTaskInfo.note}
-                onChange={(e) =>
-                  setCompletingTaskInfo({ ...completingTaskInfo, note: e.target.value })
-                }
-                className="w-full rounded-xl border border-slate-700 bg-[#0B0F19] p-3 text-white text-xs focus:border-sky-400 focus:outline-none"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800 text-xs">
-              <button
-                type="button"
-                onClick={handleQuickComplete}
-                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 font-gamer hover:text-white cursor-pointer hover:bg-slate-800"
-              >
-                БЕЗ ЗАМЕТКИ
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmCompletionNote}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-gamer font-bold cursor-pointer shadow-md"
-              >
-                СОХРАНИТЬ И ЗАВЕРШИТЬ
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* MODAL 4: SKIP REASON INPUT MODAL (Turns red day into gray) */}
+      {/* MODAL 3: SKIP REASON INPUT MODAL (Turns red day into gray) */}
       {skipReasonModalDate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <motion.div
@@ -1480,7 +1447,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 5: EDIT TASK MODAL */}
+      {/* MODAL 4: EDIT TASK MODAL */}
       {editingTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <motion.div
@@ -1562,7 +1529,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 6: RECURRING TASK DELETE OPTIONS (Single date instance vs all dates) */}
+      {/* MODAL 5: RECURRING TASK DELETE OPTIONS (Single date instance vs all dates) */}
       {taskToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <motion.div
@@ -1638,6 +1605,7 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
           </motion.div>
         </div>
       )}
+
       {/* 2-STEP CONFIRMATION MODAL FOR DELETING CATEGORY */}
       <AnimatePresence>
         {isDeleteCategoryOpen && (

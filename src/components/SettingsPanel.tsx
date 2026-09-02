@@ -14,6 +14,8 @@ import {
   AlertTriangle,
   ArrowRight,
   RotateCcw,
+  Globe,
+  Filter,
 } from 'lucide-react';
 import {
   Category,
@@ -91,6 +93,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [editingCShopId, setEditingCShopId] = useState<string | null>(null);
 
   // 5. Penalty Form State
+  const [penaltyScope, setPenaltyScope] = useState<'category' | 'global'>('category');
+  const [penaltyCategoryId, setPenaltyCategoryId] = useState<string>(
+    categories[0]?.id || ''
+  );
+  const [penaltyFilter, setPenaltyFilter] = useState<string>('all'); // 'all' | 'global' | categoryId
   const [penaltyName, setPenaltyName] = useState('');
   const [penaltyXP, setPenaltyXP] = useState<number>(200);
   const [penaltyDesc, setPenaltyDesc] = useState('');
@@ -308,6 +315,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     e.preventDefault();
     if (!penaltyName.trim()) return;
 
+    const targetScope = penaltyScope;
+    const targetCatId = targetScope === 'category' ? (penaltyCategoryId || categories[0]?.id || null) : null;
+
     let updated: Penalty[];
 
     if (editingPenaltyId) {
@@ -318,6 +328,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               name: penaltyName.trim(),
               xpDeduction: Number(penaltyXP),
               actionDescription: penaltyDesc.trim(),
+              scope: targetScope,
+              targetCategoryId: targetCatId,
             }
           : p
       );
@@ -327,6 +339,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         name: penaltyName.trim(),
         xpDeduction: Number(penaltyXP),
         actionDescription: penaltyDesc.trim(),
+        scope: targetScope,
+        targetCategoryId: targetCatId,
       };
       updated = [...penalties, newPenalty];
     }
@@ -337,11 +351,36 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setPenaltyDesc('');
     setPenaltyXP(200);
     setEditingPenaltyId(null);
-    onShowToast('success', 'Штраф сохранен', 'Список дисциплинарных штрафов обновлен.');
+    onShowToast(
+      'success',
+      'Штраф сохранен',
+      targetScope === 'global'
+        ? 'Общий штраф за UXP сохранен.'
+        : 'Штраф для категории сохранен.'
+    );
+  };
+
+  const handleStartEditPenalty = (p: Penalty) => {
+    setEditingPenaltyId(p.id);
+    setPenaltyName(p.name);
+    setPenaltyXP(p.xpDeduction);
+    setPenaltyDesc(p.actionDescription);
+    setPenaltyScope(p.scope === 'global' ? 'global' : 'category');
+    if (p.scope !== 'global' && p.targetCategoryId) {
+      setPenaltyCategoryId(p.targetCategoryId);
+    } else if (categories.length > 0) {
+      setPenaltyCategoryId(categories[0].id);
+    }
   };
 
   const handleDeletePenalty = (penId: string) => {
     onUpdatePenalties(penalties.filter((p) => p.id !== penId));
+    if (editingPenaltyId === penId) {
+      setEditingPenaltyId(null);
+      setPenaltyName('');
+      setPenaltyDesc('');
+      setPenaltyXP(200);
+    }
   };
 
   // Export JSON
@@ -1017,56 +1056,132 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* 4. PENALTIES */}
       {activeSection === 'penalties' && (
         <div className="bg-[#0F172A] p-6 rounded-2xl border border-slate-800 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
               <h3 className="font-gamer font-bold text-lg text-white">
                 ДИСЦИПЛИНАРНЫЕ ШТРАФЫ
               </h3>
               <p className="text-xs text-slate-400">
-                Списывают очки XP с выбранной категории при нарушении дисциплины.
+                Настройте индивидуальные штрафы для каждой категории или общие глобальные штрафы за UXP.
               </p>
             </div>
-            <span className="text-xs font-mono-code font-bold text-red-400 bg-red-500/10 px-2.5 py-1 rounded-xl border border-red-500/20">
+            <span className="text-xs font-mono-code font-bold text-red-400 bg-red-500/10 px-2.5 py-1 rounded-xl border border-red-500/20 shrink-0 self-start sm:self-auto">
               {penalties.length} штрафов
             </span>
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSavePenalty} className="space-y-4 text-xs bg-[#0B0F19] p-4 rounded-xl border border-slate-800">
+          <form onSubmit={handleSavePenalty} className="space-y-4 text-xs bg-[#0B0F19] p-5 rounded-2xl border border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="font-gamer font-bold text-white text-xs uppercase tracking-wide">
+                {editingPenaltyId ? 'Редактировать штраф' : '+ Добавить новый штраф'}
+              </span>
+            </div>
+
+            {/* Scope Selection: Category vs Global */}
+            <div>
+              <label className="block text-slate-300 font-gamer font-bold mb-1.5 uppercase">
+                Тип штрафа:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPenaltyScope('category')}
+                  className={`py-2.5 px-3.5 rounded-xl border flex items-center justify-center gap-2 font-gamer text-xs font-bold transition-all cursor-pointer ${
+                    penaltyScope === 'category'
+                      ? 'border-amber-500/60 bg-amber-500/15 text-amber-300 shadow-sm'
+                      : 'border-slate-800 bg-[#0F172A] text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>Штраф категории (XP)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPenaltyScope('global')}
+                  className={`py-2.5 px-3.5 rounded-xl border flex items-center justify-center gap-2 font-gamer text-xs font-bold transition-all cursor-pointer ${
+                    penaltyScope === 'global'
+                      ? 'border-purple-500/60 bg-purple-500/15 text-purple-300 shadow-sm'
+                      : 'border-slate-800 bg-[#0F172A] text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>Общий штраф (UXP)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Category Selector (Only for category scope) */}
+            {penaltyScope === 'category' && (
+              <div>
+                <label className="block text-slate-300 font-gamer font-bold mb-1.5 uppercase">
+                  Для какой категории действует штраф *
+                </label>
+                {categories.length > 0 ? (
+                  <select
+                    value={penaltyCategoryId}
+                    onChange={(e) => setPenaltyCategoryId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2.5 text-white font-gamer focus:border-red-400 focus:outline-none"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-3 bg-[#0F172A] rounded-xl border border-slate-800 text-slate-400 text-xs">
+                    Сначала создайте хотя бы одну категорию.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-slate-300 font-gamer font-bold mb-1">Название нарушения *</label>
+                <label className="block text-slate-300 font-gamer font-bold mb-1">
+                  Название нарушения *
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="например, Пропуск тренировки без причины"
+                  placeholder={
+                    penaltyScope === 'global'
+                      ? 'например, Срыв режима, лень за день'
+                      : 'например, Пропуск тренировки, не решил задачу'
+                  }
                   value={penaltyName}
                   onChange={(e) => setPenaltyName(e.target.value)}
-                  className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2 text-white focus:border-red-400 focus:outline-none"
+                  className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2.5 text-white focus:border-red-400 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-gamer font-bold mb-1">Списание XP *</label>
+                <label className="block text-slate-300 font-gamer font-bold mb-1">
+                  Списать {penaltyScope === 'global' ? 'UXP (и Титульный UXP) *' : 'XP (и Титульный XP) *'}
+                </label>
                 <input
                   type="number"
                   min={1}
                   required
                   value={penaltyXP}
                   onChange={(e) => setPenaltyXP(Number(e.target.value))}
-                  className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2 text-red-400 font-mono-code font-bold focus:border-red-400 focus:outline-none"
+                  className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2.5 text-red-400 font-mono-code font-bold focus:border-red-400 focus:outline-none"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-slate-300 font-gamer font-bold mb-1">Дисциплинарное последствие</label>
+              <label className="block text-slate-300 font-gamer font-bold mb-1">
+                Дисциплинарное последствие (наказание / отработка)
+              </label>
               <input
                 type="text"
-                placeholder="например, Сделать 50 приседаний или решить дополнительную задачу"
+                placeholder="например, Сделать 50 отжиманий, 1 час без соцсетей"
                 value={penaltyDesc}
                 onChange={(e) => setPenaltyDesc(e.target.value)}
-                className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2 text-white focus:border-red-400 focus:outline-none"
+                className="w-full rounded-xl border border-slate-800 bg-[#0F172A] px-3.5 py-2.5 text-white focus:border-red-400 focus:outline-none"
               />
             </div>
 
@@ -1080,60 +1195,169 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     setPenaltyDesc('');
                     setPenaltyXP(200);
                   }}
-                  className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 font-gamer text-xs cursor-pointer"
+                  className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 font-gamer text-xs cursor-pointer hover:bg-slate-900"
                 >
                   ОТМЕНА
                 </button>
               )}
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white font-gamer font-bold text-xs cursor-pointer shadow-md"
+                disabled={penaltyScope === 'category' && categories.length === 0}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white font-gamer font-bold text-xs cursor-pointer shadow-md disabled:opacity-50"
               >
                 {editingPenaltyId ? 'ОБНОВИТЬ ШТРАФ' : 'ДОБАВИТЬ ШТРАФ'}
               </button>
             </div>
           </form>
 
-          {/* List */}
+          {/* Penalty Filter Bar */}
           <div className="space-y-3">
-            {penalties.map((p) => (
-              <div
-                key={p.id}
-                className="p-4 rounded-xl border border-slate-800 bg-[#0B0F19] flex items-center justify-between"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-gamer font-bold text-white text-base">{p.name}</span>
-                    <span className="font-mono-code text-red-400 font-bold text-xs bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
-                      -{p.xpDeduction} XP
-                    </span>
-                  </div>
-                  {p.actionDescription && (
-                    <p className="text-slate-400 text-xs mt-0.5">{p.actionDescription}</p>
-                  )}
-                </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-gamer text-slate-400 uppercase mr-1 flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5" />
+                <span>Фильтр:</span>
+              </span>
 
-                <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPenaltyFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-gamer font-bold border transition-all cursor-pointer ${
+                  penaltyFilter === 'all'
+                    ? 'bg-slate-700 border-slate-500 text-white'
+                    : 'bg-[#0B0F19] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Все ({penalties.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPenaltyFilter('global')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-gamer font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  penaltyFilter === 'global'
+                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                    : 'bg-[#0B0F19] border-slate-800 text-slate-400 hover:text-purple-300'
+                }`}
+              >
+                <Globe className="w-3 h-3" />
+                <span>Общие UXP ({penalties.filter((p) => p.scope === 'global').length})</span>
+              </button>
+
+              {categories.map((c) => {
+                const count = penalties.filter((p) => p.scope !== 'global' && p.targetCategoryId === c.id).length;
+                const isSelected = penaltyFilter === c.id;
+                return (
                   <button
-                    onClick={() => {
-                      setEditingPenaltyId(p.id);
-                      setPenaltyName(p.name);
-                      setPenaltyXP(p.xpDeduction);
-                      setPenaltyDesc(p.actionDescription);
-                    }}
-                    className="p-2 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                    key={c.id}
+                    type="button"
+                    onClick={() => setPenaltyFilter(c.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-gamer font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'border-opacity-60 bg-opacity-20 text-white'
+                        : 'bg-[#0B0F19] border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                    style={
+                      isSelected
+                        ? {
+                            borderColor: c.color,
+                            backgroundColor: `${c.color}25`,
+                            color: c.color,
+                          }
+                        : {}
+                    }
                   >
-                    <Edit2 className="w-4 h-4" />
+                    <DynamicIcon name={c.icon} className="w-3 h-3" />
+                    <span>{c.name} ({count})</span>
                   </button>
-                  <button
-                    onClick={() => handleDeletePenalty(p.id)}
-                    className="p-2 rounded-lg text-slate-400 hover:text-red-400 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                );
+              })}
+            </div>
+
+            {/* Penalties List */}
+            {penalties.filter((p) => {
+              if (penaltyFilter === 'all') return true;
+              if (penaltyFilter === 'global') return p.scope === 'global';
+              return p.scope !== 'global' && p.targetCategoryId === penaltyFilter;
+            }).length === 0 ? (
+              <div className="p-8 rounded-2xl border border-dashed border-slate-800 bg-[#0B0F19] text-center text-slate-500 text-xs font-gamer">
+                Штрафы для выбранного фильтра еще не настроены.
               </div>
-            ))}
+            ) : (
+              <div className="space-y-2.5">
+                {penalties
+                  .filter((p) => {
+                    if (penaltyFilter === 'all') return true;
+                    if (penaltyFilter === 'global') return p.scope === 'global';
+                    return p.scope !== 'global' && p.targetCategoryId === penaltyFilter;
+                  })
+                  .map((p) => {
+                    const isGlobal = p.scope === 'global';
+                    const cat = !isGlobal ? categories.find((c) => c.id === p.targetCategoryId) : null;
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="p-4 rounded-xl border border-slate-800 bg-[#0B0F19] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-gamer font-bold text-white text-sm">{p.name}</span>
+
+                            {/* Scope / Category Badge */}
+                            {isGlobal ? (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-gamer font-bold bg-purple-500/15 border border-purple-500/30 text-purple-300 flex items-center gap-1">
+                                <Globe className="w-3 h-3" />
+                                <span>ОБЩИЙ (UXP)</span>
+                              </span>
+                            ) : cat ? (
+                              <span
+                                className="px-2 py-0.5 rounded-md text-[10px] font-gamer font-bold border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: `${cat.color}15`,
+                                  borderColor: `${cat.color}40`,
+                                  color: cat.color,
+                                }}
+                              >
+                                <DynamicIcon name={cat.icon} className="w-3 h-3" />
+                                <span>{cat.name}</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-gamer font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                                Категория не назначена
+                              </span>
+                            )}
+
+                            <span className="font-mono-code text-red-400 font-bold text-xs bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                              -{p.xpDeduction} {isGlobal ? 'UXP' : 'XP'}
+                            </span>
+                          </div>
+
+                          {p.actionDescription && (
+                            <p className="text-slate-400 text-xs">{p.actionDescription}</p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleStartEditPenalty(p)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                            title="Редактировать штраф"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePenalty(p.id)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            title="Удалить штраф"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </div>
       )}

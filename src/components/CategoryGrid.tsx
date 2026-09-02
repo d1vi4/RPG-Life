@@ -12,6 +12,7 @@ import {
   Trash2,
   AlertTriangle,
   ShieldAlert,
+  Calendar,
 } from 'lucide-react';
 import { Category, Task } from '../types';
 import { DynamicIcon, AVAILABLE_ICONS } from './DynamicIcon';
@@ -24,7 +25,184 @@ interface CategoryGridProps {
   onSelectCategory: (categoryId: string) => void;
   onAddCategory: (category: Omit<Category, 'id' | 'categoryXP' | 'highestCategoryXP' | 'levels' | 'shopItems'>) => void;
   onDeleteCategory: (categoryId: string) => void;
+  onReorderCategories?: (newCategories: Category[]) => void;
+  onOpenGlobalCalendar: () => void;
 }
+
+interface CategoryCardItemProps {
+  category: Category;
+  tasks: Task[];
+  onSelectCategory: (categoryId: string) => void;
+  onStartDelete: (cat: Category, e: React.MouseEvent) => void;
+}
+
+const CategoryCardItem: React.FC<CategoryCardItemProps> = ({
+  category,
+  tasks,
+  onSelectCategory,
+  onStartDelete,
+}) => {
+  const todayStr = getTodayDateString();
+  const todayDayOfWeek = getDayOfWeek(todayStr);
+
+  const prog = calculateCategoryProgression(
+    category.categoryXP || 0,
+    category.highestCategoryXP || 0,
+    category.levels || []
+  );
+
+  // Filter today's tasks including recurring tasks
+  const categoryTasksToday = tasks.filter((t) => {
+    if (t.categoryId !== category.id) return false;
+    if (t.recurrence === 'daily') return true;
+    if (t.recurrence === 'weekly') {
+      return (t.repeatDays || []).includes(todayDayOfWeek);
+    }
+    return t.date === todayStr;
+  });
+
+  const completedTasksToday = categoryTasksToday.filter((t) => {
+    if (t.recurrence === 'none') return t.isCompleted;
+    return (t.completedDates || []).includes(todayStr);
+  });
+
+  const isAllCompletedToday =
+    categoryTasksToday.length > 0 &&
+    completedTasksToday.length === categoryTasksToday.length;
+
+  return (
+    <div
+      onClick={() => onSelectCategory(category.id)}
+      className="group relative overflow-hidden rounded-2xl border border-slate-800/90 bg-[#0F172A]/90 p-5 shadow-lg backdrop-blur-xl transition-all duration-200 hover:border-sky-500/50 hover:shadow-[0_0_20px_rgba(14,165,233,0.15)] hover:-translate-y-0.5 cursor-pointer flex flex-col justify-between h-full"
+      style={{
+        borderLeftColor: category.color,
+        borderLeftWidth: '3px',
+      }}
+    >
+      <div>
+        {/* Category Card Header */}
+        <div className="flex items-start justify-between gap-2.5">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-2xl border shadow-lg transition-transform group-hover:scale-105 shrink-0"
+              style={{
+                backgroundColor: `${category.color}15`,
+                borderColor: `${category.color}40`,
+                color: category.color,
+              }}
+            >
+              <DynamicIcon name={category.icon} className="h-5 w-5" />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <h3 className="font-gamer font-bold text-base text-white group-hover:text-sky-400 transition-colors truncate">
+                {category.name}
+              </h3>
+              <div
+                className="text-[11px] font-mono-code font-bold uppercase tracking-wider mt-0.5 truncate"
+                style={{ color: category.color }}
+              >
+                <span>{prog.currentLevel ? prog.currentLevel.name : 'Без звания'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* XP & Title Badges + Delete Action */}
+          <div className="flex flex-col items-end gap-1.5 shrink-0 ml-1">
+            <div className="flex items-center gap-1.5">
+              <div
+                className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-mono-code font-bold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 shrink-0"
+                title="Доступно для покупок в магазине категории"
+              >
+                <Coins className="w-3 h-3" />
+                <span>{category.categoryXP.toLocaleString()} XP</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => onStartDelete(category, e)}
+                className="p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition-colors cursor-pointer shrink-0"
+                title="Удалить категорию"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div
+              className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono-code font-bold border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 shrink-0"
+              title="Максимальный титульный рекорд XP за все время"
+            >
+              <Award className="w-3 h-3 text-indigo-400" />
+              <span>{(category.highestCategoryXP || category.categoryXP).toLocaleString()} XP</span>
+            </div>
+          </div>
+        </div>
+
+        {category.description && (
+          <p className="mt-2.5 text-xs text-slate-400 line-clamp-2 leading-relaxed">
+            {category.description}
+          </p>
+        )}
+
+        {/* Level & XP Balance Bar */}
+        <div className="mt-3.5 pt-3 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-baseline justify-between gap-1 text-xs mb-1.5 font-mono-code">
+            <span className="text-slate-300 font-gamer font-bold flex items-center gap-1 shrink-0">
+              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+              <span>Звание:</span>
+            </span>
+            <span className="text-slate-400 text-[11px] truncate max-w-[200px] text-right font-medium">
+              {prog.nextLevel ? `до ${prog.nextLevel.name}: ${prog.nextLevel.requiredXP} XP` : 'MAX ЗВАНИЕ'}
+            </span>
+          </div>
+
+          {/* Mini progress bar */}
+          <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${prog.progressPercent}%`,
+                backgroundColor: category.color || '#38BDF8',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Today's Tasks Indicator */}
+        <div className="mt-3 flex items-center justify-between text-xs font-mono-code bg-[#0B0F19] px-3 py-2 rounded-xl border border-slate-800">
+          <span className="text-slate-400 flex items-center gap-1.5 shrink-0">
+            <Clock className="w-3.5 h-3.5 text-slate-500" />
+            <span>Задачи на сегодня:</span>
+          </span>
+          <span
+            className={`font-bold shrink-0 ${
+              categoryTasksToday.length === 0
+                ? 'text-slate-500'
+                : isAllCompletedToday
+                ? 'text-emerald-400'
+                : 'text-amber-400'
+            }`}
+          >
+            {completedTasksToday.length} / {categoryTasksToday.length}
+          </span>
+        </div>
+      </div>
+
+      {/* Card Footer */}
+      <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[11px] font-gamer text-slate-400 flex items-center gap-1 shrink-0">
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span>Товаров: {(category.shopItems || []).length}</span>
+        </span>
+
+        <span className="inline-flex items-center gap-1 text-xs font-gamer font-bold text-sky-400 group-hover:translate-x-0.5 transition-transform shrink-0">
+          <span>ОТКРЫТЬ КАЛЕНДАРЬ</span>
+          <ArrowRight className="h-3.5 w-3.5" />
+        </span>
+      </div>
+    </div>
+  );
+};
 
 export const CategoryGrid: React.FC<CategoryGridProps> = ({
   categories,
@@ -32,6 +210,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
   onSelectCategory,
   onAddCategory,
   onDeleteCategory,
+  onOpenGlobalCalendar,
 }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [name, setName] = useState('');
@@ -42,9 +221,6 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
   // 2-step deletion state for accidental deletion protection
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
   const [deleteConfirmStep, setDeleteConfirmStep] = useState<1 | 2>(1);
-
-  const todayStr = getTodayDateString();
-  const todayDayOfWeek = getDayOfWeek(todayStr);
 
   const handleCreateCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,32 +264,42 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header section with Add Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Header section with Global Calendar & Add Category Buttons */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-extrabold font-gamer tracking-wide text-white flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-extrabold font-gamer tracking-wide text-white flex items-center gap-2">
             <span>НАПРАВЛЕНИЯ & КАТЕГОРИИ</span>
-            <span className="text-xs font-mono-code bg-sky-500/15 text-sky-400 border border-sky-500/30 px-2.5 py-0.5 rounded-full">
+            <span className="text-xs font-mono-code bg-sky-500/15 text-sky-400 border border-sky-500/30 px-2.5 py-0.5 rounded-full shrink-0">
               {categories.length} категорий
             </span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Изолированные направления с персональным балансом XP, званиями, магазином и календарем задач
+            Изолированные направления с персональным XP, магазином, званиями и календарем
           </p>
         </div>
 
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setIsAddModalOpen(true)}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-gamer font-bold text-xs sm:text-sm shadow-[0_0_15px_rgba(14,165,233,0.3)] cursor-pointer transition-all shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          <span>СОЗДАТЬ КАТЕГОРИЮ</span>
-        </motion.button>
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={onOpenGlobalCalendar}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-sky-400 text-sky-400 hover:text-white font-gamer font-bold text-xs sm:text-sm shadow-md cursor-pointer transition-all shrink-0"
+          >
+            <Calendar className="h-4 w-4 text-sky-400" />
+            <span>ОБЩИЙ КАЛЕНДАРЬ</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAddModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-gamer font-bold text-xs sm:text-sm shadow-[0_0_15px_rgba(14,165,233,0.3)] cursor-pointer transition-all shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            <span>СОЗДАТЬ КАТЕГОРИЮ</span>
+          </button>
+        </div>
       </div>
 
-      {/* Grid of Category Cards */}
+      {/* 2D Grid of Category Cards with Drag and Drop Reordering */}
       {categories.length === 0 ? (
         <div className="p-12 text-center bg-[#0F172A] rounded-2xl border border-dashed border-slate-800 text-slate-400">
           <Award className="h-10 w-10 mx-auto text-slate-500 mb-3" />
@@ -122,6 +308,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
             Нажмите кнопку «Создать категорию» выше, чтобы добавить ваше первое направление (например: Программирование, Спорт, Математика, Английский).
           </p>
           <button
+            type="button"
             onClick={() => setIsAddModalOpen(true)}
             className="mt-4 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-gamer font-bold text-xs cursor-pointer transition-colors shadow-lg"
           >
@@ -130,159 +317,16 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {categories.map((category) => {
-            const prog = calculateCategoryProgression(
-              category.categoryXP || 0,
-              category.highestCategoryXP || 0,
-              category.levels || []
-            );
-
-            // Filter today's tasks including recurring tasks
-            const categoryTasksToday = tasks.filter((t) => {
-              if (t.categoryId !== category.id) return false;
-              if (t.recurrence === 'daily') return true;
-              if (t.recurrence === 'weekly') {
-                return (t.repeatDays || []).includes(todayDayOfWeek);
-              }
-              return t.date === todayStr;
-            });
-
-            const completedTasksToday = categoryTasksToday.filter((t) => {
-              if (t.recurrence === 'none') return t.isCompleted;
-              return (t.completedDates || []).includes(todayStr);
-            });
-
-            const isAllCompletedToday =
-              categoryTasksToday.length > 0 &&
-              completedTasksToday.length === categoryTasksToday.length;
-
-            return (
-              <motion.div
-                key={category.id}
-                whileHover={{ y: -4, scale: 1.01 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onSelectCategory(category.id)}
-                className="group relative overflow-hidden rounded-2xl border border-slate-800 bg-[#0F172A] p-5 shadow-lg backdrop-blur-xl transition-all duration-300 hover:border-sky-500/50 hover:shadow-[0_0_20px_rgba(14,165,233,0.15)] cursor-pointer flex flex-col justify-between"
-              >
-                <div>
-                  {/* Category Card Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="flex h-12 w-12 items-center justify-center rounded-2xl border shadow-lg transition-transform group-hover:scale-105"
-                        style={{
-                          backgroundColor: `${category.color}15`,
-                          borderColor: `${category.color}40`,
-                          color: category.color,
-                        }}
-                      >
-                        <DynamicIcon name={category.icon} className="h-6 w-6" />
-                      </div>
-
-                      <div>
-                        <h3 className="font-gamer font-bold text-base text-white group-hover:text-sky-400 transition-colors line-clamp-1">
-                          {category.name}
-                        </h3>
-                        <div
-                          className="text-[11px] font-mono-code font-bold uppercase tracking-wider mt-0.5 flex items-center gap-1.5"
-                          style={{ color: category.color }}
-                        >
-                          <span>{prog.currentLevel ? prog.currentLevel.name : 'Без звания'}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* XP & Title Badges + Delete Action */}
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <div className="flex items-center gap-1.5">
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-mono-code font-bold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400" title="Доступно для покупок в магазине">
-                          <Coins className="w-3 h-3" />
-                          <span>{category.categoryXP.toLocaleString()} XP</span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartDelete(category, e)}
-                          className="p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition-colors cursor-pointer"
-                          title="Удалить категорию (с подтверждением)"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono-code font-bold border border-indigo-500/20 bg-indigo-500/10 text-indigo-300" title="Максимальный титульный рекорд XP за все время">
-                        <Award className="w-3 h-3 text-indigo-400" />
-                        <span>{(category.highestCategoryXP || category.categoryXP).toLocaleString()} XP</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {category.description && (
-                    <p className="mt-3 text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                      {category.description}
-                    </p>
-                  )}
-
-                  {/* Level & XP Balance Bar */}
-                  <div className="mt-4 pt-3 border-t border-slate-800/80">
-                    <div className="flex justify-between items-center text-xs font-mono-code mb-1.5">
-                      <span className="text-slate-400 font-gamer font-bold flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                        <span>Звание</span>
-                      </span>
-                      <span className="text-slate-500 text-[11px]">
-                        {prog.nextLevel ? `до ${prog.nextLevel.name}: ${prog.nextLevel.requiredXP} XP` : 'MAX ЗВАНИЕ'}
-                      </span>
-                    </div>
-
-                    {/* Mini progress bar */}
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${prog.progressPercent}%`,
-                          backgroundColor: category.color || '#38BDF8',
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Today's Tasks Indicator */}
-                  <div className="mt-3 flex items-center justify-between text-xs font-mono-code bg-[#0B0F19] px-3 py-2 rounded-xl border border-slate-800">
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Задачи на сегодня:</span>
-                    </span>
-                    <span
-                      className={`font-bold ${
-                        categoryTasksToday.length === 0
-                          ? 'text-slate-500'
-                          : isAllCompletedToday
-                          ? 'text-emerald-400'
-                          : 'text-amber-400'
-                      }`}
-                    >
-                      {completedTasksToday.length} / {categoryTasksToday.length}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Card Footer */}
-                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[11px] font-gamer text-slate-500 flex items-center gap-1">
-                    <ShoppingBag className="w-3.5 h-3.5" />
-                    <span>Товаров: {(category.shopItems || []).length}</span>
-                  </span>
-
-                  <span className="inline-flex items-center gap-1 text-xs font-gamer font-bold text-sky-400 group-hover:translate-x-0.5 transition-transform">
-                    <span>ОТКРЫТЬ КАЛЕНДАРЬ</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </span>
-                </div>
-              </motion.div>
-            );
-          })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {categories.map((category) => (
+            <CategoryCardItem
+              key={category.id}
+              category={category}
+              tasks={tasks}
+              onSelectCategory={onSelectCategory}
+              onStartDelete={handleStartDelete}
+            />
+          ))}
         </div>
       )}
 
@@ -386,6 +430,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({
           </motion.div>
         </div>
       )}
+
       {/* 2-STEP CONFIRMATION MODAL FOR DELETING CATEGORY */}
       <AnimatePresence>
         {categoryToDelete && (

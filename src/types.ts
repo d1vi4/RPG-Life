@@ -79,7 +79,8 @@ export interface Penalty {
   name: string;
   xpDeduction: number;
   actionDescription: string;
-  targetCategoryId?: string; // Optional specific category
+  scope?: 'category' | 'global';
+  targetCategoryId?: string | null; // Optional specific category if scope === 'category'
 }
 
 export interface ActivityLog {
