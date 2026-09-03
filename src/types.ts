@@ -1,6 +1,17 @@
 export type CurrencyType = 'XP' | 'UXP';
 export type TaskDifficulty = 'Easy' | 'Medium' | 'Hard' | 'Olympiad';
 export type TaskRecurrence = 'none' | 'daily' | 'weekly';
+export type TaskType = 'standard' | 'multi';
+
+export type TitleVisualEffect = 'none' | 'glow' | 'neon' | 'shimmer';
+export type TitleEffect = TitleVisualEffect;
+
+export interface TaskOption {
+  id: string;
+  title: string;
+  xpReward: number;
+  uxpReward?: number;
+}
 
 export interface CategoryLevel {
   id: string;
@@ -8,6 +19,8 @@ export interface CategoryLevel {
   requiredXP: number;
   rewardDescription?: string;
   icon?: string;
+  color?: string; // Default #3b82f6 (blue)
+  effect?: TitleVisualEffect; // 'none' | 'glow' | 'neon' | 'shimmer'
 }
 
 export interface CategoryShopItem {
@@ -36,6 +49,8 @@ export interface GlobalLevel {
   requiredUXP: number;
   rewardDescription?: string;
   icon?: string;
+  color?: string; // Default #3b82f6 (blue)
+  effect?: TitleVisualEffect; // 'none' | 'glow' | 'neon' | 'shimmer'
 }
 
 export interface GlobalShopItem {
@@ -70,6 +85,15 @@ export interface Task {
   completionNotesByDate?: Record<string, string>; // Completion notes per date
   difficulty?: TaskDifficulty;
   notes?: string;
+
+  // Multi-option task support
+  type?: TaskType; // 'standard' | 'multi'
+  options?: TaskOption[]; // 2 or more options when type === 'multi'
+  selectedOptionId?: string; // ID of chosen option for non-recurring multi-task
+  selectedOptionByDate?: Record<string, string>; // dateStr -> optionId for recurring multi-task
+
+  // Protection from retroactive penalties & calendar display
+  createdAt?: string; // Date or timestamp of task creation (YYYY-MM-DD or ISO)
 }
 
 export type CloudSyncStatus = 'synced' | 'saving' | 'error' | 'offline';
@@ -81,6 +105,9 @@ export interface Penalty {
   actionDescription: string;
   scope?: 'category' | 'global';
   targetCategoryId?: string | null; // Optional specific category if scope === 'category'
+  categoryId?: string | null;
+  amountXP?: number;
+  description?: string;
 }
 
 export interface ActivityLog {

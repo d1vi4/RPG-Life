@@ -9,6 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { ActivityLogView } from './components/ActivityLogView';
 import { PenaltyModal } from './components/PenaltyModal';
 import { GlobalCalendarModal } from './components/GlobalCalendarModal';
+import { ThemeMockupsModal } from './components/ThemeMockupsModal';
 import { Toast, ToastNotification } from './components/Toast';
 
 import {
@@ -119,6 +120,7 @@ export const App: React.FC = () => {
   const [isPenaltyModalOpen, setIsPenaltyModalOpen] = useState(false);
   const [penaltyInitialCategoryId, setPenaltyInitialCategoryId] = useState<string | null>(null);
   const [isGlobalCalendarOpen, setIsGlobalCalendarOpen] = useState(false);
+  const [isThemeMockupsOpen, setIsThemeMockupsOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Toast notifications queue
@@ -151,6 +153,10 @@ export const App: React.FC = () => {
       isNavigatingFromHistory.current = true;
       if (isGlobalCalendarOpen) {
         setIsGlobalCalendarOpen(false);
+        return;
+      }
+      if (isThemeMockupsOpen) {
+        setIsThemeMockupsOpen(false);
         return;
       }
       if (isPenaltyModalOpen) {
@@ -479,6 +485,7 @@ export const App: React.FC = () => {
     const newTask: Task = {
       ...newTaskData,
       id: `task-${Date.now()}`,
+      createdAt: newTaskData.createdAt || new Date().toISOString(),
       completedDates: [],
     };
     setTasks((prev) => [newTask, ...prev]);
@@ -490,21 +497,193 @@ export const App: React.FC = () => {
     addToast('info', 'Задача обновлена', `Изменения в «${updatedTask.title}» сохранены.`);
   };
 
+  // Multi-Task option selection handler (Multi-Task mechanic)
+  const handleSelectMultiTaskOption = (
+    taskId: string,
+    date: string,
+    optionId: string | null
+  ) => {
+    const todayStr = getTodayDateString();
+    // 00:00 Lock protection
+    if (date < todayStr) {
+      addToast('penalty', 'День заблокирован', 'Задачи за прошедшие дни зафиксированы в 00:00 и закрыты для редактирования.');
+      return;
+    }
+
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const targetCategory = categories.find((c) => c.id === task.categoryId);
+    if (!targetCategory) return;
+
+    // Previous state on this date
+    const prevOptionId =
+      task.recurrence === 'none'
+        ? task.selectedOptionId
+        : task.selectedOptionByDate?.[date];
+    const prevOption = task.options?.find((o) => o.id === prevOptionId);
+    const prevXP = prevOption ? prevOption.xpReward : 0;
+    const prevUXP = prevOption ? (prevOption.uxpReward ?? task.uxpReward) : 0;
+
+    const newOption = optionId ? task.options?.find((o) => o.id === optionId) : null;
+    const newXP = newOption ? newOption.xpReward : 0;
+    const newUXP = newOption ? (newOption.uxpReward ?? task.uxpReward) : 0;
+
+    const isNowCompleted = !!newOption;
+    const xpDelta = newXP - prevXP;
+    const uxpDelta = newUXP - prevUXP;
+
+    // 1. Update task state
+    setTasks((prevTasks) =>
+      prevTasks.map((t) => {
+        if (t.id !== taskId) return t;
+
+        if (t.recurrence === 'none') {
+          return {
+            ...t,
+            isCompleted: isNowCompleted,
+            selectedOptionId: optionId || undefined,
+          };
+        } else {
+          const completedDates = t.completedDates || [];
+          const newDates = isNowCompleted
+            ? [...completedDates.filter((d) => d !== date), date]
+            : completedDates.filter((d) => d !== date);
+
+          const newOptionMap = { ...(t.selectedOptionByDate || {}) };
+          if (optionId) {
+            newOptionMap[date] = optionId;
+          } else {
+            delete newOptionMap[date];
+          }
+
+          return {
+            ...t,
+            completedDates: newDates,
+            selectedOptionByDate: newOptionMap,
+          };
+        }
+      })
+    );
+
+    // 2. Play sound and confetti if newly completed
+    if (isNowCompleted && xpDelta > 0) {
+      soundFX.playTaskComplete();
+      triggerTaskCompleteConfetti();
+    }
+
+    // 3. Category XP progression
+    if (xpDelta !== 0) {
+      setCategories((prev) =>
+        prev.map((c) => {
+          if (c.id !== targetCategory.id) return c;
+          const newCategoryXP = Math.max(0, (c.categoryXP || 0) + xpDelta);
+          const newHighestXP = xpDelta > 0
+            ? Math.max(c.highestCategoryXP || 0, newCategoryXP)
+            : Math.max(0, (c.highestCategoryXP || 0) + xpDelta);
+
+          const prevProg = calculateCategoryProgression(c.categoryXP || 0, c.highestCategoryXP || 0, c.levels || []);
+          const nextProg = calculateCategoryProgression(newCategoryXP, newHighestXP, c.levels || []);
+
+          if (nextProg.currentLevel && nextProg.currentLevel.id !== prevProg.currentLevel?.id) {
+            soundFX.playLevelUp();
+            triggerLevelUpConfetti();
+            addToast('levelup', `Новое звание в «${c.name}»!`, `Вы достигли звания: ${nextProg.currentLevel.name}!`);
+          }
+
+          return {
+            ...c,
+            categoryXP: newCategoryXP,
+            highestCategoryXP: newHighestXP,
+          };
+        })
+      );
+    }
+
+    // 4. Global UXP progression
+    if (uxpDelta !== 0) {
+      setGlobalState((prev) => {
+        const newUXP = Math.max(0, (prev.globalUXP || 0) + uxpDelta);
+        const newHighestUXP = uxpDelta > 0
+          ? Math.max(prev.highestGlobalUXP || 0, newUXP)
+          : Math.max(0, (prev.highestGlobalUXP || 0) + uxpDelta);
+
+        const prevProg = calculateGlobalProgression(prev.globalUXP || 0, prev.highestGlobalUXP || 0, prev.globalLevels || []);
+        const nextProg = calculateGlobalProgression(newUXP, newHighestUXP, prev.globalLevels || []);
+
+        if (nextProg.currentLevel && nextProg.currentLevel.id !== prevProg.currentLevel?.id) {
+          soundFX.playLevelUp();
+          triggerLevelUpConfetti();
+          addToast('levelup', 'Новое глобальное звание!', `Вы достигли общего ранга: ${nextProg.currentLevel.name}!`);
+        }
+
+        return {
+          ...prev,
+          globalUXP: newUXP,
+          highestGlobalUXP: newHighestUXP,
+        };
+      });
+    }
+
+    // 5. Activity log
+    setActivityLogs((prev) => [
+      {
+        id: `log-multi-${Date.now()}-${Math.random()}`,
+        type: isNowCompleted ? 'task_complete' : 'task_uncomplete',
+        title: isNowCompleted ? 'Мульти-задача: вариант выбран' : 'Мульти-задача: выбор отменен',
+        details: `${task.title} • ${newOption ? `Вариант: «${newOption.title}»` : 'Сброшен выбор'} (${targetCategory.name})`,
+        timestamp: Date.now(),
+        xpChange: xpDelta,
+        uxpChange: uxpDelta,
+      },
+      ...prev,
+    ]);
+
+    if (newOption) {
+      addToast(
+        'success',
+        'Вариант сохранён',
+        `Выбрано: «${newOption.title}» (+${newOption.xpReward} XP в «${targetCategory.name}»).`
+      );
+    }
+  };
+
   // When a task is deleted, cleanly deduct all XP, UXP, Title XP and Title UXP earned from it
   const handleDeleteTask = (taskId: string) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
-    // Calculate how many times this task was completed
+    let totalEarnedXP = 0;
+    let totalEarnedUXP = 0;
     let completedCount = 0;
-    if (targetTask.recurrence === 'none') {
-      completedCount = targetTask.isCompleted ? 1 : 0;
-    } else {
-      completedCount = (targetTask.completedDates || []).length;
-    }
 
-    const totalEarnedXP = completedCount * (targetTask.xpReward || 0);
-    const totalEarnedUXP = completedCount * (targetTask.uxpReward || 0);
+    if (targetTask.type === 'multi') {
+      if (targetTask.recurrence === 'none') {
+        const selOpt = targetTask.options?.find((o) => o.id === targetTask.selectedOptionId);
+        if (selOpt && targetTask.isCompleted) {
+          totalEarnedXP += selOpt.xpReward || 0;
+          totalEarnedUXP += (selOpt.uxpReward ?? targetTask.uxpReward) || 0;
+          completedCount = 1;
+        }
+      } else {
+        const optionMap = targetTask.selectedOptionByDate || {};
+        for (const [, optId] of Object.entries(optionMap)) {
+          const selOpt = targetTask.options?.find((o) => o.id === optId);
+          if (selOpt) {
+            totalEarnedXP += selOpt.xpReward || 0;
+            totalEarnedUXP += (selOpt.uxpReward ?? targetTask.uxpReward) || 0;
+            completedCount++;
+          }
+        }
+      }
+    } else {
+      if (targetTask.recurrence === 'none') {
+        completedCount = targetTask.isCompleted ? 1 : 0;
+      } else {
+        completedCount = (targetTask.completedDates || []).length;
+      }
+      totalEarnedXP = completedCount * (targetTask.xpReward || 0);
+      totalEarnedUXP = completedCount * (targetTask.uxpReward || 0);
+    }
 
     // 1. Remove task from tasks state
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
@@ -565,23 +744,39 @@ export const App: React.FC = () => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
-    const isCompletedOnDate =
-      targetTask.recurrence === 'none'
-        ? !!targetTask.isCompleted
-        : (targetTask.completedDates || []).includes(dateStr);
+    let xpToDeduct = 0;
+    let uxpToDeduct = 0;
 
-    const xpToDeduct = isCompletedOnDate ? targetTask.xpReward || 0 : 0;
-    const uxpToDeduct = isCompletedOnDate ? targetTask.uxpReward || 0 : 0;
+    if (targetTask.type === 'multi') {
+      const optId = targetTask.selectedOptionByDate?.[dateStr];
+      const selOpt = targetTask.options?.find((o) => o.id === optId);
+      if (selOpt) {
+        xpToDeduct = selOpt.xpReward || 0;
+        uxpToDeduct = (selOpt.uxpReward ?? targetTask.uxpReward) || 0;
+      }
+    } else {
+      const isCompletedOnDate =
+        targetTask.recurrence === 'none'
+          ? !!targetTask.isCompleted
+          : (targetTask.completedDates || []).includes(dateStr);
+
+      xpToDeduct = isCompletedOnDate ? targetTask.xpReward || 0 : 0;
+      uxpToDeduct = isCompletedOnDate ? targetTask.uxpReward || 0 : 0;
+    }
 
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== taskId) return t;
         const excluded = t.excludedDates || [];
         const completed = t.completedDates || [];
+        const optionMap = { ...(t.selectedOptionByDate || {}) };
+        delete optionMap[dateStr];
+
         return {
           ...t,
           excludedDates: excluded.includes(dateStr) ? excluded : [...excluded, dateStr],
           completedDates: completed.filter((d) => d !== dateStr),
+          selectedOptionByDate: optionMap,
         };
       })
     );
@@ -830,10 +1025,11 @@ export const App: React.FC = () => {
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled((prev) => !prev)}
         cloudSyncStatus={cloudSyncStatus}
+        onOpenThemeMockups={() => setIsThemeMockupsOpen(true)}
       />
 
       {/* Main Content Area with bottom padding for mobile navigation */}
-      <main className="lg:pl-72 flex-1 flex flex-col min-w-0 pb-24 lg:pb-8">
+      <main className="lg:pl-72 flex-1 flex flex-col min-w-0 pb-24 lg:pb-8 transition-colors">
         <div className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           {/* VIEW ROUTING */}
           {activeTab === 'categories' && (
@@ -859,6 +1055,7 @@ export const App: React.FC = () => {
                     setIsPenaltyModalOpen(true);
                   }}
                   onReorderTasks={handleReorderTasks}
+                  onSelectMultiTaskOption={handleSelectMultiTaskOption}
                 />
               ) : (
                 <CategoryGrid
@@ -930,6 +1127,12 @@ export const App: React.FC = () => {
         categories={categories}
         initialCategoryId={penaltyInitialCategoryId}
         onApplyPenalty={handleApplyPenalty}
+      />
+
+      {/* 5 Visual UI Mockups & Theme Gallery Modal */}
+      <ThemeMockupsModal
+        isOpen={isThemeMockupsOpen}
+        onClose={() => setIsThemeMockupsOpen(false)}
       />
     </div>
   );

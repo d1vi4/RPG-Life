@@ -18,10 +18,12 @@ import {
   CloudAlert,
   Award,
   Zap,
+  Palette,
 } from 'lucide-react';
 import { Category, GlobalState, CloudSyncStatus } from '../types';
 import { calculateGlobalProgression } from '../utils/progression';
 import { DynamicIcon } from './DynamicIcon';
+import { TitleBadge } from './TitleBadge';
 
 interface HeaderProps {
   globalState: GlobalState;
@@ -32,6 +34,7 @@ interface HeaderProps {
   soundEnabled: boolean;
   onToggleSound: () => void;
   cloudSyncStatus: CloudSyncStatus;
+  onOpenThemeMockups?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   soundEnabled,
   onToggleSound,
   cloudSyncStatus,
+  onOpenThemeMockups,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -113,9 +117,14 @@ export const Header: React.FC<HeaderProps> = ({
               <h2 className="font-gamer font-bold text-sm tracking-tight text-white truncate">
                 LifeRPG Hero
               </h2>
-              <div className="text-[11px] text-sky-400 font-mono-code font-bold uppercase tracking-wider flex items-center gap-1.5 mt-0.5 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-                <span>{globalProg.currentLevel ? globalProg.currentLevel.name : 'Без общего звания'}</span>
+              <div className="mt-1">
+                <TitleBadge
+                  title={globalProg.currentLevel ? globalProg.currentLevel.name : 'Без звания'}
+                  icon={globalProg.currentLevel?.icon || 'Crown'}
+                  color={globalProg.currentLevel?.color || '#3b82f6'}
+                  effect={globalProg.currentLevel?.effect || 'none'}
+                  size="sm"
+                />
               </div>
             </div>
           </div>
@@ -202,6 +211,16 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Sidebar Footer Controls */}
         <div className="pt-4 border-t border-slate-800 space-y-2">
+          {onOpenThemeMockups && (
+            <button
+              onClick={onOpenThemeMockups}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-purple-500/15 to-indigo-500/15 border border-purple-500/30 text-purple-300 hover:text-white hover:border-purple-400 text-xs font-gamer font-bold cursor-pointer transition-all shadow-sm group"
+            >
+              <Palette className="w-4 h-4 text-purple-400 group-hover:rotate-12 transition-transform" />
+              <span>КОНЦЕПТЫ СТИЛЯ (5)</span>
+            </button>
+          )}
+
           <div className="flex items-center justify-between gap-2">
             <button
               onClick={onOpenPenaltyModal}
@@ -229,20 +248,25 @@ export const Header: React.FC<HeaderProps> = ({
       {/* 2. MOBILE TOP BAR */}
       <header className="lg:hidden sticky top-0 z-30 bg-[#0F172A]/95 backdrop-blur-xl border-b border-slate-800 px-3.5 py-2.5 shadow-md">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold shadow-sm shrink-0">
               <DynamicIcon name={globalProg.currentLevel?.icon || 'Crown'} className="w-4 h-4" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="flex items-center gap-1.5 truncate">
                 <span className="font-gamer font-bold text-xs text-white truncate">LifeRPG</span>
-                <span className="text-[10px] font-mono-code font-bold text-sky-400 bg-sky-500/10 px-1.5 py-0.2 rounded border border-sky-500/20">
+                <span className="text-[10px] font-mono-code font-bold text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 shrink-0">
                   {globalState.globalUXP} UXP
                 </span>
               </div>
-              <div className="text-[10px] text-slate-400 font-mono-code flex items-center gap-1 truncate">
-                <Crown className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
-                <span className="truncate">Титул: {globalState.highestGlobalUXP || globalState.globalUXP} UXP</span>
+              <div className="mt-0.5 truncate flex items-center">
+                <TitleBadge
+                  title={globalProg.currentLevel ? globalProg.currentLevel.name : 'Без звания'}
+                  icon={globalProg.currentLevel?.icon || 'Crown'}
+                  color={globalProg.currentLevel?.color || '#3b82f6'}
+                  effect={globalProg.currentLevel?.effect || 'none'}
+                  size="sm"
+                />
               </div>
             </div>
           </div>
@@ -295,6 +319,20 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="font-mono-code font-bold text-purple-300">{(globalState.highestGlobalUXP || globalState.globalUXP).toLocaleString()} UXP</span>
                 </div>
               </div>
+
+              {onOpenThemeMockups && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenThemeMockups();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-gamer font-bold cursor-pointer"
+                >
+                  <Palette className="w-4 h-4 text-purple-400" />
+                  <span>КОНЦЕПТЫ СТИЛЯ UI (5)</span>
+                </button>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

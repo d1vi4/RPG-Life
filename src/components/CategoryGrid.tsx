@@ -51,9 +51,11 @@ const CategoryCardItem: React.FC<CategoryCardItemProps> = ({
     category.levels || []
   );
 
-  // Filter today's tasks including recurring tasks
+  // Filter today's tasks including recurring tasks (with createdAt retrospective shield)
   const categoryTasksToday = tasks.filter((t) => {
     if (t.categoryId !== category.id) return false;
+    const taskCreatedDate = t.createdAt ? t.createdAt.slice(0, 10) : t.date;
+    if (todayStr < taskCreatedDate) return false;
     if (t.recurrence === 'daily') return true;
     if (t.recurrence === 'weekly') {
       return (t.repeatDays || []).includes(todayDayOfWeek);
